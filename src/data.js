@@ -108,6 +108,7 @@ export const QUICK_PROMPTS = [
   { id: 'yt-script',      label: 'YOUTUBE SCRIPT', prompt: 'Write a 10-minute YouTube script on the topic: "5 Study Tips That Actually Work in 2026 (Backed by Science)". Start with a dramatic statement hook (NEVER a question). Include timestamps every 30-60 seconds, 3 title options, a description, 15 tags, and thumbnail text. End with "Anything else on this, Anwaar?"' },
   { id: 'ig-posts',       label: 'INSTAGRAM POSTS',prompt: 'Write 7 Instagram posts for rooted (parenting platform) — one for each day of the week. Each post needs a caption (parent-friendly, warm tone), 10 hashtags, and a CTA. Mix of educational, relatable, and product-focused. End with "Anything else on this, Anwaar?"' },
   { id: 'weekly-report',  label: 'WEEKLY REPORT',  prompt: 'Generate a weekly performance report for scholarics.com covering the last 7 days. Include: top 5 pages by traffic, AdSense RPM and CTR, search keyword wins, indexing errors, and 3 priority actions for next week. End with "Anything else on this, Anwaar?"' },
+  { id: 'generate-image', label: 'GENERATE IMAGE', prompt: 'Generate a vibrant, high-quality hero image for my latest content — bold colors, modern digital illustration style, clean composition.' },
 ];
 
 // ── Network map hubs / arcs (geo coords) ──
