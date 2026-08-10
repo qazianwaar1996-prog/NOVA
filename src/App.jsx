@@ -81,6 +81,86 @@ async function sendToNOVA(userCmd) {
   return reply;
 }
 
+/* ═══════════════ COMMAND CONSOLE LOG BUS ═══════════════ */
+// Global, append-only ring of console lines. Other components push to it
+// (e.g. CommandBar on each command) and the ConsolePanel subscribes via
+// the useNovaConsole hook to re-render in real time. Capped at MAX lines.
+const MAX_CONSOLE = 50;
+const CONSOLE_TAG_COLORS = {
+  SYSTEM:  '#ff9a26', // orange
+  ROUTER:  '#ffb443', // amber
+  AGENT:   '#ffc24d', // bright orange
+  NOVA:    '#35e08a', // green
+  UPLINK:  '#5ac8ff', // cyan/blue
+  ERROR:   '#ff6a4a', // red
+  MISSION: '#9fe8c4',
+  AI:      '#6aa8ff',
+  SECURITY:'#35e08a',
+  NETWORK: '#9a7bff',
+  DATABASE:'#5ac8ff',
+};
+let _console = [...CONSOLE_LINES];
+const _consoleSubs = new Set();
+const _emitConsole = () => _consoleSubs.forEach((fn) => fn(_console));
+const _tsConsole = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+const pushConsole = (tag, text, opts = {}) => {
+  const color = opts.color || CONSOLE_TAG_COLORS[tag] || '#cfa875';
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    t: opts.t || _tsConsole(),
+    tag,
+    color,
+    text,
+  };
+  _console = [..._console, entry].slice(-MAX_CONSOLE);
+  _emitConsole();
+  return entry;
+};
+function useNovaConsole() {
+  const [items, setItems] = useState(_console);
+  useEffect(() => {
+    const sub = (next) => setItems(next);
+    _consoleSubs.add(sub);
+    return () => { _consoleSubs.delete(sub); };
+  }, []);
+  return items;
+}
+
+/* Sleep helper for sequenced log lines. */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* Stream a sequenced set of log lines for a single command. Each call emits
+   the same six lines (in the user-specified order, with 300ms gaps) and then
+   the SUCCESS / ERROR tail once the API call resolves. */
+async function logNovaCommand(cmd, agent, runFetch) {
+  const t0 = Date.now();
+  const preview = (cmd || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const previewSuffix = (cmd || '').length > 40 ? '…' : '';
+  pushConsole('SYSTEM', `Command received: "${preview}${previewSuffix}"`);
+  await sleep(300);
+  pushConsole('ROUTER', 'Detecting agent...');
+  await sleep(300);
+  pushConsole('AGENT',  `${agent} → Agent activated`);
+  await sleep(300);
+  pushConsole('AGENT',  `${agent} → Processing request...`);
+  try {
+    const reply = await runFetch();
+    await sleep(300);
+    pushConsole('NOVA',   `Response generated successfully (${Date.now() - t0}ms)`);
+    await sleep(300);
+    const summary = (reply || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    pushConsole('UPLINK', `Output delivered to Commander — "${summary}${(reply || '').length > 60 ? '…' : ''}"`);
+    return { ok: true, reply };
+  } catch (err) {
+    pushConsole('ERROR',  `Connection interrupted. ${(err && err.message) || 'Retry.'}`);
+    return { ok: false, reply: 'Connection interrupted. Retry.' };
+  }
+}
+
 /* ═══════════════ LIVE ACTIVITY BUS ═══════════════ */
 // Lightweight pub/sub so CommandBar can push activity to FeedPanel without
 // prop drilling through DesktopNOVA. Subscribers keep a local copy and render.
@@ -976,6 +1056,15 @@ function WorldMapPanel() {
 }
 
 function ConsolePanel() {
+  const items = useNovaConsole();
+  const bodyRef = useRef(null);
+  // Auto-scroll to the bottom whenever new lines arrive. The blinking prompt
+  // sits at the end of the scrollable area, so it always stays visible.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [items]);
   return (
     <Chamfer x={1108} y={750} w={450} h={198} c={10}>
       <PanelTitle title="COMMAND CONSOLE" />
@@ -983,9 +1072,9 @@ function ConsolePanel() {
         <ChamferFrame size={15} c={3}><Zap size={8} /></ChamferFrame>
         <ChamferFrame size={15} c={3}><X size={8} /></ChamferFrame>
       </div>
-      <div className="consolebody">
-        {CONSOLE_LINES.map((l, i) => (
-          <div key={i} className="cline">
+      <div className="consolebody" ref={bodyRef}>
+        {items.map((l) => (
+          <div key={l.id} className="cline">
             <span className="ct">{l.t}</span>
             <span className="cg" style={{ color: l.color }}>[{l.tag}]</span>
             <span className="cx" style={l.tag === 'MISSION' ? { color: '#9fe8c4' } : undefined}>{l.text}</span>
@@ -1019,8 +1108,10 @@ function CommandBar() {
       text: `↳ ${summarizeCmd(userCmd)}`,
       status: 'PROCESSING',
     });
-    try {
-      const reply = await sendToNOVA(userCmd);
+    // Stream the sequenced SYSTEM/ROUTER/AGENT/NOVA/UPLINK log lines into
+    // the Command Console panel while the API call runs.
+    const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
+    if (ok) {
       setOutput(reply);
       // follow-up entry with the result summary
       pushActivity({
@@ -1030,8 +1121,8 @@ function CommandBar() {
         text: `✓ ${summarizeCmd(reply, 70)}`,
         status: 'SUCCESS',
       });
-    } catch {
-      setOutput('Connection interrupted. Retry.');
+    } else {
+      setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -1040,7 +1131,7 @@ function CommandBar() {
         status: 'FAILED',
       });
     }
-    finally { setThinking(false); }
+    setThinking(false);
   };
   return (
     <>
@@ -1611,8 +1702,10 @@ function MobileCommandConsole() {
       text: `↳ ${summarizeCmd(userCmd)}`,
       status: 'PROCESSING',
     });
-    try {
-      const reply = await sendToNOVA(userCmd);
+    // Stream sequenced log lines into the shared console log bus (same one
+    // the desktop Command Console subscribes to).
+    const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
+    if (ok) {
       setOutput(reply);
       pushActivity({
         t: nowStamp(),
@@ -1621,8 +1714,8 @@ function MobileCommandConsole() {
         text: `✓ ${summarizeCmd(reply, 70)}`,
         status: 'SUCCESS',
       });
-    } catch {
-      setOutput('Connection interrupted. Retry.');
+    } else {
+      setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -1631,7 +1724,8 @@ function MobileCommandConsole() {
         status: 'FAILED',
       });
     }
-    finally { setThinking(false); setTimeout(() => setExecuted(false), 1200); }
+    setThinking(false);
+    setTimeout(() => setExecuted(false), 1200);
   };
   return (
     <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>

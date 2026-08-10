@@ -334,7 +334,13 @@ body {
 /* ═══════════════════════ CONSOLE ═════════════════════════════ */
 .consolebody { position: absolute; left: 14px; right: 14px; top: 34px; bottom: 12px;
   background: linear-gradient(180deg, rgba(6,3,1,.5), rgba(3,2,1,.65));
-  border: 1px solid var(--line-soft); padding: 9px 12px; overflow: hidden; }
+  border: 1px solid var(--line-soft); padding: 9px 12px; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: rgba(255,154,38,0.55) rgba(20,10,4,0.4);
+  scroll-behavior: smooth; }
+.consolebody::-webkit-scrollbar { width: 6px; }
+.consolebody::-webkit-scrollbar-track { background: rgba(20,10,4,0.4); }
+.consolebody::-webkit-scrollbar-thumb { background: rgba(255,154,38,0.55); border-radius: 3px; }
+.consolebody::-webkit-scrollbar-thumb:hover { background: rgba(255,154,38,0.85); }
 .cline { display: flex; align-items: baseline; height: 19.5px; font-family: var(--fm); font-size: 8.5px; }
 .cline .ct { color: var(--tx-faint); width: 60px; flex: none; }
 .cline .cg { width: 78px; flex: none; font-weight: 700; }
