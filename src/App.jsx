@@ -404,68 +404,31 @@ function modelForAgent(agent) {
 // still gets its specialized structured prompt.
 async function sendToNOVA(userCmd) {
   const agent = detectAgent(userCmd);
-  const useWeekly = isWeeklyReport(userCmd);
-  const systemPrompt = useWeekly ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT;
-
+  // IMAGE AGENT → Pollinations (free, no key). Keep this non-LLM route so
+  // image generation still works even if the text providers are flaky.
   try {
-    // ── IMAGE AGENT → Pollinations (free, no key) ────────────────
     if (agent === 'IMAGE') {
       const imageUrl = await generateImage(userCmd);
       return `[IMAGE AGENT] ACTIVATED\n\nGenerating image via Pollinations AI…\n\n![Generated Image](${imageUrl})\n\nImage URL: ${imageUrl}`;
     }
 
-    // ── Gemini-primary agents (analysis & reasoning) ─────────────
-    // SEO AGENT → Gemini · ANALYTICS → Gemini · MONETIZE → Gemini (→ Cohere)
-    if (agent === 'SEO AGENT' || agent === 'ANALYTICS') {
-      return await callGemini(userCmd, systemPrompt);
-    }
-    if (agent === 'MONETIZE') {
-      return await callGemini(userCmd, systemPrompt)
-        .catch(() => callCohere(userCmd, systemPrompt));
-    }
+    const systemPrompt = isWeeklyReport(userCmd) ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT;
 
-    // ── Mistral-primary agents (writing & language) ──────────────
-    // CONTENT / MARKETS → Mistral (→ Gemini) · EMAIL → Mistral (→ Groq)
-    if (agent === 'CONTENT' || agent === 'MARKETS') {
-      return await callMistral(userCmd, systemPrompt)
-        .catch(() => callGemini(userCmd, systemPrompt));
+    // Gemini is ALWAYS the primary API for everything (most generous free
+    // tier). Only fall back to Groq if Gemini fails. Otherwise surface a
+    // clear error so the debug line in NOVAOutputModal can show it.
+    try {
+      const reply = await callGemini(userCmd, systemPrompt);
+      return reply;
+    } catch (e1) {
+      try {
+        return await callGroq(userCmd, systemPrompt);
+      } catch (e2) {
+        return `NOVA offline. Error: ${e1 && e1.message ? e1.message : e1} | Groq error: ${e2 && e2.message ? e2.message : e2}`;
+      }
     }
-    if (agent === 'EMAIL') {
-      return await callMistral(userCmd, systemPrompt)
-        .catch(() => callGroq(userCmd, systemPrompt));
-    }
-
-    // ── Groq-primary agents (fast) ───────────────────────────────
-    // SOCIAL → Groq/Llama (→ Gemini)
-    if (agent === 'SOCIAL') {
-      return await callGroq(userCmd, systemPrompt)
-        .catch(() => callGemini(userCmd, systemPrompt));
-    }
-
-    // ── DeepSeek-primary agents (creative & technical) ───────────
-    // YOUTUBE → DeepSeek (→ Gemini) · MONITOR → DeepSeek (→ Groq)
-    if (agent === 'YOUTUBE') {
-      return await callDeepSeek(userCmd, systemPrompt)
-        .catch(() => callGemini(userCmd, systemPrompt));
-    }
-    if (agent === 'MONITOR') {
-      return await callDeepSeek(userCmd, systemPrompt)
-        .catch(() => callGroq(userCmd, systemPrompt));
-    }
-
-    // ── OpenRouter-primary agents ────────────────────────────────
-    // IDEAS → OpenRouter (→ Gemini)
-    if (agent === 'IDEAS') {
-      return await callOpenRouter(userCmd, systemPrompt)
-        .catch(() => callGemini(userCmd, systemPrompt));
-    }
-
-    // ── Default fallback chain: Gemini → Groq → Mistral ──────────
-    return await callGemini(userCmd, systemPrompt)
-      .catch(() => callGroq(userCmd, systemPrompt))
-      .catch(() => callMistral(userCmd, systemPrompt));
   } catch (err) {
-    return `Connection interrupted. All APIs unreachable. Error: ${err.message}`;
+    return `Connection interrupted. Error: ${err && err.message ? err.message : err}`;
   }
 }
 
@@ -1841,6 +1804,27 @@ function NOVAOutputModal({ output, agent, onClose }) {
           </div>
         </div>
         <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
+          {/* TEMPORARY DEBUG: if the response contains "Error:", surface the
+              raw error verbatim at the top so we can see exactly which API
+              is failing and why. Remove once API keys are confirmed. */}
+          {typeof output === 'string' && /Error:/i.test(output) && (
+            <div style={{
+              marginBottom: 12, padding: '10px 12px',
+              background: 'rgba(255,74,74,0.12)',
+              border: '1px solid rgba(255,74,74,0.55)',
+              borderRadius: 4,
+              fontFamily: 'Share Tech Mono, monospace',
+              fontSize: 11,
+              color: '#ffb4a8',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 2, color: '#ff6a4a', marginBottom: 6 }}>
+                ⚠ RAW API ERROR (debug)
+              </div>
+              {output}
+            </div>
+          )}
           {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderFormatted(output)}
         </div>
       </div>
