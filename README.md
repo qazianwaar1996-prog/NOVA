@@ -1,6 +1,6 @@
 # NOVA — AI Operations Command Center
 
-A futuristic AI operations command center UI built with React + Vite + PWA.
+A futuristic AI operations command center UI built with React + Vite.
 
 ## 🌐 Live Site
 
@@ -58,14 +58,15 @@ Pages → Source to "GitHub Actions".
 
 - `vite.config.js` already sets `base: '/NOVA/'`, so asset URLs resolve correctly
   under the `https://<user>.github.io/NOVA/` project-page path.
-- PWA manifest and service worker scope/start_url are also set to `/NOVA/`.
+- No service worker is registered — a legacy `sw.js` is shipped only to
+  self-unregister itself and clear old caches in visitors' browsers (it fixes
+  blank-page issues caused by stale PWA precaches after redeploys).
 - `.nojekyll` is included in the Pages publish so Jekyll doesn't strip files
-  beginning with `_` (needed by Vite's hashed assets and Workbox).
+  beginning with `_`.
 
 ## 🎨 Features
 
 - NOVA-inspired futuristic dark UI
 - Orbitron / Rajdhani / Share Tech Mono typography
 - Animated dots / particle background
-- PWA (installable, offline-capable via Workbox)
 - Mobile-first, touch-friendly layout
