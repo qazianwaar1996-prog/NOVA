@@ -875,23 +875,31 @@ function DesktopNOVA() {
 
 /* ═══════════════ MOBILE NOVA COMMAND DEVICE ═══════════════ */
 const ALL_AGENTS = [...AGENTS_LEFT, ...AGENTS_RIGHT];
+/* Bottom navigation is 5 items as specified: HOME, AI TEAM, PROJECTS, TASKS, MORE.
+   MORE jumps to the start of the extended sections (APIs + feed + perf + network) */
 const MOBILE_NAV = [
   { id: 'home', target: 'mobile-home', icon: 'layout-grid', label: 'HOME' },
   { id: 'team', target: 'mobile-team', icon: 'users', label: 'AI TEAM' },
   { id: 'projects', target: 'mobile-projects', icon: 'clipboard-list', label: 'PROJECTS' },
   { id: 'tasks', target: 'mobile-tasks', icon: 'list-todo', label: 'TASKS' },
-  { id: 'apis', target: 'mobile-apis', icon: 'hexagon', label: 'APIS' },
-  { id: 'more', target: 'mobile-more', icon: 'settings', label: 'MORE' },
+  { id: 'more', target: 'mobile-apis', icon: 'settings', label: 'MORE' },
 ];
 
 function useIsMobile() {
-  const get = () => (typeof window !== 'undefined' ? window.innerWidth <= 700 : false);
+  const get = () => (typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const [isMobile, setIsMobile] = useState(get);
   useEffect(() => {
     const onResize = () => setIsMobile(get());
     onResize();
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    // also listen to media query for robustness
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handler = () => setIsMobile(mq.matches);
+    try { mq.addEventListener('change', handler); } catch { mq.addListener(handler); }
+    return () => {
+      window.removeEventListener('resize', onResize);
+      try { mq.removeEventListener('change', handler); } catch { mq.removeListener(handler); }
+    };
   }, []);
   return isMobile;
 }
