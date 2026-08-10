@@ -2,42 +2,65 @@
 
 A futuristic AI operations command center UI built with React + Vite + PWA.
 
-## 🌐 Live Deployment
+## 🌐 Live Site
 
 **GitHub Pages:** https://qazianwaar1996-prog.github.io/NOVA/
 
-## 🚀 Auto-Deploy with GitHub Actions
+The site is live and served from the `gh-pages` branch. Every release build is
+pushed there via `npm run deploy` (which uses the `gh-pages` package).
 
-This repo is configured to auto-deploy to GitHub Pages via GitHub Actions on every push to `main` (or the arena working branch), plus manual `workflow_dispatch` triggers.
+## 🚀 Auto-Deploy
 
-### Workflow file
-The deploy workflow lives at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). It:
+Two paths are provided — pick whichever fits your workflow.
+
+### 1. GitHub Actions workflow (recommended)
+
+A ready-to-use Actions workflow is at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+It runs on every push to `main` (and on manual `workflow_dispatch`):
 
 1. Checks out the repo
-2. Sets up Node 20 (with npm cache)
-3. Installs dependencies with `npm ci`
-4. Runs `npm run build` (Vite outputs to `dist/`)
-5. Uploads `dist/` as a Pages artifact
-6. Deploys the artifact to GitHub Pages using `actions/deploy-pages`
+2. Sets up Node 20 with npm cache
+3. Installs dependencies (`npm ci`)
+4. Builds (`npm run build` → outputs to `dist/`)
+5. Uploads the `dist/` artifact to GitHub Pages
+6. Deploys via `actions/deploy-pages@v4`
 
-### One-time repo setup (already done)
-- GitHub Pages is enabled for this repo at https://github.com/qazianwaar1996-prog/NOVA/settings/pages
-- Public URL: https://qazianwaar1996-prog.github.io/NOVA/
-- `vite.config.js` already sets `base: '/NOVA/'` so assets resolve correctly under the project subpath.
-- A `public/.nojekyll` file is included to disable Jekyll processing (required for Vite's `_…` prefixed files and PWA service worker).
+To enable it, in **Settings → Pages** set **Source** to **GitHub Actions**, then
+commit and push the workflow file to `main`. (The sandboxed GitHub App token
+used in this environment cannot create workflow files via the API — it lacks the
+`workflows` scope — so push the file directly or open a PR from a client that
+has that permission.)
 
-### Switching Pages source to GitHub Actions
-If you want the Actions workflow to be the source of truth instead of the `gh-pages` branch, go to
-**Settings → Pages** and set **Source** to **GitHub Actions**. The current deployment uses the
-`gh-pages` branch (via the `npm run deploy` script which uses the `gh-pages` npm package) until that
-switch is flipped.
+### 2. `gh-pages` branch deploy (working now)
+
+This is how the live site is currently deployed. The `npm run deploy` script
+builds `dist/` (with a `.nojekyll` marker added automatically via the `--nojekyll`
+flag) and pushes it to the `gh-pages` branch, which GitHub Pages is configured
+to serve.
+
+```bash
+npm run deploy
+```
+
+This can also be wired to CI by checking the workflow back in and switching
+Pages → Source to "GitHub Actions".
 
 ## 📦 Scripts
 
-- `npm run dev` — start Vite dev server
-- `npm run build` — production build into `dist/`
-- `npm run preview` — preview the production build locally
-- `npm run deploy` — one-shot deploy from local `dist/` to the `gh-pages` branch (manual fallback)
+| Command           | What it does                                              |
+| ----------------- | --------------------------------------------------------- |
+| `npm run dev`     | Start Vite dev server                                     |
+| `npm run build`   | Production build into `dist/`                             |
+| `npm run preview` | Preview the production build locally                      |
+| `npm run deploy`  | Build + push `dist/` to the `gh-pages` branch (live now)  |
+
+## ⚙️ Configuration notes
+
+- `vite.config.js` already sets `base: '/NOVA/'`, so asset URLs resolve correctly
+  under the `https://<user>.github.io/NOVA/` project-page path.
+- PWA manifest and service worker scope/start_url are also set to `/NOVA/`.
+- `.nojekyll` is included in the Pages publish so Jekyll doesn't strip files
+  beginning with `_` (needed by Vite's hashed assets and Workbox).
 
 ## 🎨 Features
 
