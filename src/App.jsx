@@ -82,9 +82,64 @@ Close with: "Anything else on this, Anwaar?"
 ✍️ CONTENT AGENT — triggers on: blog, article, write, guide, content, post
 → Full SEO-ready article: H1 title, intro hook, 4–6 H2 sections, body, CTA. Adapt tone to SCHOLARICS (helpful, student-friendly) or ROOTED (warm, authoritative parenting). Include 3 title variants at the top and a meta description at the bottom.
 
-📱 SOCIAL AGENT — triggers on: instagram, twitter, linkedin, pinterest, social, fb, facebook, caption, reel, post
-→ IG caption (hook + body + 10 hashtags), X/Twitter thread (4–6 tweets), LinkedIn post, Pinterest pin title+description. Tailor to platform.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 SOCIAL MEDIA AGENT — triggers on: instagram, twitter, x, linkedin, pinterest, social, fb, facebook, caption, reel, post, ig, tweet, thread, pin, board, social media, socials
 
+When the SOCIAL AGENT activates, ALWAYS generate a COMPLETE cross-platform content package for the platform(s) mentioned. If the user says "social", "social media", "socials", or names a topic but no specific platform, generate content for ALL FIVE platforms (Instagram, Twitter/X, Pinterest, LinkedIn, Facebook). If they specify one platform, still output all five unless they explicitly say "only instagram" etc.
+
+Detect the brand automatically from the prompt:
+- scholarics / gpa / study / grades / student / college / exam / academic → SCHOLARICS (student tone — casual, high-energy, relatable, emoji-light, speak like a peer)
+- rooted / parent / baby / newborn / sleep / kid / toddler / pregnancy / mom / dad → ROOTED (warm parenting tone — empathetic, reassuring, expert-but-friendly, no mom-shaming)
+- anything else → generic NOVA/tech/entrepreneurship tone (bold, motivational, action-oriented)
+
+Start with:
+"[SOCIAL AGENT] ACTIVATED — Cross-platform content package locked in, Anwaar.\n"
+
+Then output these sections, separated by a horizontal rule \`---\` between platforms, in this exact order:
+
+## ▸ INSTAGRAM
+**CAPTION** — 150–200 words. First line is a STOP-THE-SCROLL hook statement (no questions). Then 2–3 short paragraphs: a relatable pain point, the value/tip/announcement, a question prompt for comments. End with a soft CTA. Use line breaks, 3–5 relevant emojis sparingly. Student tone for Scholarics, parent tone for Rooted.
+**HASHTAGS (10)** — 10 hashtags as a comma-separated inline code list. Mix 3 broad, 4 niche, 3 branded/long-tail.
+**STORIES (3 slides)** — Three Instagram Story slides, each with:
+  - Slide 1: Bold statement hook (max 8 words, large text) + visual cue
+  - Slide 2: The tip / stat / takeaway (2 lines)
+  - Slide 3: CTA + poll or question sticker suggestion
+Format stories as \`SLIDE 1/2/3:\` with the text.
+
+---
+
+## ▸ TWITTER / X
+**THREAD (5 tweets)** — Number them 1/5 through 5/5.
+- Tweet 1/5: HOOK — a single provocative statement (not a question) + one-line promise of what the thread delivers. Must make people stop scrolling and click "show this thread".
+- Tweets 2/5, 3/5, 4/5: Each makes ONE specific point — either a numbered tip, a surprising stat, a contrarian take, or a mini-step. Keep each scannable (one sentence + one supporting sentence, or one bold claim + example). Use line breaks.
+- Tweet 5/5: WRAP-UP + CTA — recap in one line, then a clear CTA (follow, reply with a keyword, click link in bio, retweet for others who need this).
+Each tweet MUST be under 280 characters (stricter, ~240 chars to leave room for the N/# marker). Wrap the full thread in a \`\`\`text code block so it's copy-paste ready.
+
+---
+
+## ▸ PINTEREST
+**PIN TITLE** — Short keyword-rich title (under 100 chars) with the top search term first.
+**PIN DESCRIPTION** — ~300 characters, keyword dense (what it is + who it helps + what they'll get + clear action). Read like a human Pin description, not spam. End with 2–3 broad keywords.
+**BOARD SUGGESTION** — Suggest an existing board name where this pin belongs (e.g., "College Study Tips", "Newborn Sleep Hacks"), plus a 1-line reason.
+**PINTEREST KEYWORDS (5)** — Five high-intent Pinterest search keywords, comma-separated, inline code.
+
+---
+
+## ▸ LINKEDIN
+**POST** — ~200 words. Professional, value-first, founder/operator voice.
+  - Opening line: a bold observation or contrarian claim tailored to professionals/educators/parents/industry (depending on brand).
+  - 2–3 short paragraphs with one concrete insight, a quick personal anecdote or stat, and a reflection.
+  - Close with a question to drive comments.
+  - No emojis (or 1 max). Use line breaks for scannability. No hashtags inside the body.
+**HASHTAGS (3)** — Three professional, relevant hashtags at the very end on one line.
+
+---
+
+## ▸ FACEBOOK
+**POST** — ~100 words, conversational, community-first. Speak like you're talking to a friend in a group. Ask a question early to drive comments. For Scholarics speak to students (and parents), for Rooted speak to parents and caregivers. Warm, no corporate tone. 1–2 emojis max.
+**SUGGESTED POSTING TIME** — One line with recommended time + day and 1-sentence reasoning (e.g., "⏰ Suggested: Tuesday 7–8 PM PKT — students scroll right after evening study sessions.").
+
+Close the package with: "Content package ready for scheduling — drop it into your scheduler, Anwaar."
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎬 YOUTUBE AGENT — triggers on: youtube, script, video, shorts, hook, thumbnail, title, description, tags, outro, intro, editing, longform, short, reel-youtube
 
@@ -232,10 +287,10 @@ function detectAgent(t) {
   t = t.toLowerCase();
   // Check YouTube BEFORE SEO — "title" and "description" appear in both,
   // but a user asking for a YouTube script/title/thumbnail means YouTube.
-  if(/(youtube|yt|\byoutube\b|video script|shorts|long[ -]?form|short[ -]?form|thumbnail|video idea|outro|intro for video|make a video|write a script)/.test(t)) return "YOUTUBE AGENT";
+  if(/(youtube|yt|\byoutube\b|video script|shorts|long[ -]?form|short[ -]?form|thumbnail|video idea|outro|intro for video|make a video|write a script)/.test(t)) return "YOUTUBE";
+  if(/(instagram|\btwitter\b|\bx\b|linkedin|pinterest|social media|\bfb\b|facebook|caption|reel(?! youtube)|tiktok|tik tok|post for)/.test(t)) return "SOCIAL";
   if(/(seo|audit|meta (?!title for video)|keyword|schema|ranking|serp|backlink|on-page|onpage)/.test(t)) return "SEO AGENT";
   if(/(blog|article|write a guide|long-form content)/.test(t)) return "CONTENT";
-  if(/(instagram|twitter|linkedin|pinterest|social media|\bfb\b|facebook|caption|reel(?! youtube))/.test(t)) return "SOCIAL";
   if(/(email|reply|draft email|mail)/.test(t)) return "EMAIL";
   if(/(analytics|traffic|adsense|stats|report|ga4)/.test(t)) return "ANALYTICS";
   if(/(uptime|deploy|github|error|broken|ci|build)/.test(t)) return "MONITOR";
@@ -347,6 +402,20 @@ function renderMarkdown(text) {
       continue;
     } else {
       flushList();
+    }
+
+    // Horizontal rule (---, ***, ___)
+    if (/^[-*_]{3,}\s*$/.test(line.trim())) {
+      flushList();
+      out.push(
+        <hr key={"hr-" + out.length} style={{
+          border: "none",
+          borderTop: `1px solid ${C.border2}`,
+          margin: "10px 0",
+          boxShadow: `0 0 6px ${C.orange}22`,
+        }} />
+      );
+      continue;
     }
 
     // Blank line
@@ -1529,6 +1598,259 @@ Package ready for upload — send it to the editor, Anwaar.`;
 }
 
 // ══════════════════════════════════════════════════
+// Demo Social Media cross-platform package — used
+// when no ANTHROPIC_API_KEY is set, so the SOCIAL
+// AGENT is fully functional out-of-the-box.
+// ══════════════════════════════════════════════════
+function buildDemoSocialReport(rawTopic) {
+  const t = (rawTopic || "").trim();
+  const lower = t.toLowerCase();
+  const isScholarics = /scholarics|gpa|cgpa|grade|study|student|exam|college|school|academic|semester|final/i.test(lower);
+  const isRooted = /rooted|parent|baby|newborn|sleep|kid|toddler|discipline|pregnan|mom|dad|child/i.test(lower);
+
+  const niche = isScholarics
+    ? {
+        brand: "Scholarics",
+        audience: "students",
+        topic: "GPA calculator + study hacks",
+        igCaption:
+`Your GPA doesn't care how late you stayed up. 📉
+
+I spent my entire first semester pulling all-nighters, rewriting every highlight, and somehow still finished with a 2.9.
+Meanwhile my roommate was out playing cricket on weekends and locked a 3.8.
+The difference wasn't intelligence. It was one stupid mistake I didn't know I was making — I was spending 80% of my time re-reading chapters and 0% testing myself.
+
+Once I flipped that (and built myself a free GPA calculator to see exactly what I needed on every exam), my grades jumped 0.4 points in one semester.
+
+The calculator is live on Scholarics — it takes 30 seconds and tells you exactly what score you need on every final to hit your target. No login, no paywall, no nonsense.
+
+Link in bio.
+What's your GPA goal this semester? Drop it in the comments 👇`,
+        igHashtags: "#gpa #collegetips #studyhacks #studentlife #gpacalculator #howtostudy #scholarics #collegestudent #examtips #studymotivation",
+        igStory1: "STUDYING MORE\nDOESN'T RAISE\nYOUR GPA",
+        igStory2: "Retrieval > rereading.\n8 min post-lecture\nrecall = game changer.",
+        igStory3: "Tap the link in bio\n→ Free GPA Calculator\n→ Find your target",
+        threadHook: "Studying more hours will NOT raise your GPA. Here's the stupid mistake that tanked my first semester — and the 3 moves that pulled me to a 3.8:",
+        threadT2: "2/5\nThe lie: 'study longer = better grades.'\n\nThe truth: Students with the highest GPAs don't study the most. They study the right things. I watched my roommate pull all-nighters and finish at 2.9. I studied HALF the time and beat him.",
+        threadT3: "3/5\nMistake #1: Re-reading notes.\n\nRe-reading is the fake productivity drug. It feels like work. Your brain isn't being challenged — it's being comforted. The moment you close the book you forget 60% of it.",
+        threadT4: "4/5\nThe fix: After every lecture, spend 8 minutes writing down everything you remember FROM MEMORY. No slides, no notes. If you can't pull it out that day, you will NOT pull it out on the exam.\n\nThen plug your grades into a GPA target calculator so you know exactly what score you need on every final. I built a free one at Scholarics.",
+        threadT5: "5/5\nThat one shift added 0.4 to my GPA in a single semester.\n\nFree GPA calculator: https://scholarics.com\n\nRT for a classmate who needs to see this. Follow for more exam-killing study hacks.",
+        pinTitle: "Free GPA Calculator — Know Your Exact Target Grades in 30 Seconds",
+        pinDesc: "Free online GPA calculator for college and high school students. Plug in your current grades and your target GPA to see exactly what scores you need on every remaining exam, quiz and final. Fast, mobile-friendly, no sign-up. Calculate GPA, track your semester, raise your grades. Study tips, exam hacks, college GPA, student life.",
+        boardName: "College Study Tips & Student Hacks",
+        boardReason: "Students actively save study-planning and grade-tracking pins to these boards for the whole semester.",
+        pinKeywords: "gpa calculator, how to calculate gpa, college study tips, exam study plan, semester grades",
+        liPost:
+`The highest-GPA students I've met don't study the most. They study the right things.
+
+I learned this the hard way in my first semester — pulling repeated all-nighters, re-reading every highlighted line, and still finishing with a 2.9. When I finally stopped confusing effort with progress and switched to retrieval-based study (plus a target-GPA calculator that told me exactly what score I needed on every exam), I jumped 0.4 points in one semester.
+
+Three takeaways for any student right now:
+1. Stop re-reading. Start recalling. Eight minutes of blank-paper recall after each lecture beats two hours of passive review.
+2. Know your numbers. If you don't know exactly what score you need on the final, you're studying blind.
+3. Protect your sleep. A rested 70% beats an exhausted 100% every finals week.
+
+I built a free GPA target calculator for this exact problem at Scholarics — no signup, no ads.
+
+What's the one study habit that actually moved the needle for you?`,
+        liHashtags: "#StudentSuccess #StudyTips #EdTech",
+        fbPost:
+`Real talk for students this semester 📚
+
+If you're spending 6 hours a day re-reading chapters and your grades still aren't moving — you're not bad at studying. You're using the wrong method.
+
+I went from a 2.9 to a 3.8 after I stopped rereading and started (1) testing myself after every lecture and (2) knowing exactly what score I needed on each exam.
+
+I built a free GPA calculator on Scholarics that shows you your target scores in 30 seconds. No signup, no paywall. Link in comments!
+
+What's the biggest thing killing your GPA this semester?`,
+        fbTime: "⏰ Suggested: Sunday 7–9 PM PKT — students scroll hard the night before the week starts, planning their study schedule."
+      }
+    : isRooted
+    ? {
+        brand: "Rooted",
+        audience: "new & expecting parents",
+        topic: "newborn sleep and E.A.S.Y. routine",
+        igCaption:
+`It's 2:47 AM and you're bouncing a screaming newborn for the third night in a row.
+
+Every parenting app on your phone says they should be "sleeping through the night by now."
+Your mother-in-law is asking if you're "spoiling" them.
+You're starting to wonder if you're doing something wrong.
+
+You're not. 🤍
+
+The truth: newborns wake because their stomachs are the size of a cherry and they need calories. The 8-week sleep-through myth is doing enormous damage to new parents everywhere.
+
+The routine that finally saved us was E.A.S.Y. — Eat, Activity, Sleep, You. And the real secret? Learning to put them down drowsy but awake in that 30-second window before they fully knock out. It sounds tiny. It changes everything.
+
+We built Rooted for exactly this — judgment-free, evidence-based stage guides and sleep routines built for real parents, not perfect ones. App link in bio.
+
+Tag a parent who needs to hear this tonight 💛`,
+        igHashtags: "#newmom #newborn #babysleep #parenting #newbornsleep #momlife #firsttimemom #rootedparenting #gentleparenting #postpartum",
+        igStory1: "YOUR BABY\nDOESN'T SLEEP?\nIT'S NOT YOU.",
+        igStory2: "E.A.S.Y. routine:\nEat → Activity →\nSleep → You time.",
+        igStory3: "Tap link in bio\n→ Free newborn\n  sleep guide",
+        threadHook: "If your newborn isn't sleeping through the night, it's not your fault. Here's what every sleep book conveniently leaves out — and the one routine that saved us:",
+        threadT2: "2/5\nThe lie: babies 'should' sleep through by 8 weeks.\n\nThe truth: at birth their stomachs are the size of a cherry. They wake because they need calories, not because you're bad at this. Ditch the guilt before it eats you alive.",
+        threadT3: "3/5\nThe routine that finally worked for us is called E.A.S.Y. — Eat, Activity, Sleep, You.\n\nFull feed first (top them up, don't snack). 15–20 minutes of activity. Then swaddle and into the crib drowsy but awake. Then — and this is non-negotiable — YOU rest.",
+        threadT4: "4/5\nThe real secret is the 'drowsy but awake' window.\n\nIf they fall asleep IN your arms and you transfer them? You've built a sleep prop and they'll wake the second the mattress touches their back.\nWait for heavy eyelids + slowed breathing, then lay them down.",
+        threadT5: "5/5\nTwo weeks of this and we started seeing 4–5 hour stretches. It's not a miracle — it's biology.\n\nFree week-by-week newborn sleep guide in the Rooted app — https://rooted.app\n\nRT for a new parent scrolling at 3AM.",
+        pinTitle: "Newborn Sleep Routine That Actually Works (E.A.S.Y. Method For Real Babies)",
+        pinDesc: "A gentle, evidence-based newborn sleep routine using the E.A.S.Y. method — Eat, Activity, Sleep, You time. Learn how to get your newborn to sleep without cry-it-out, understand the drowsy-but-awake window, and build healthy sleep habits from week one. Newborn tips for new moms, first-time parents, postpartum.",
+        boardName: "Newborn Sleep Tips & Gentle Parenting",
+        boardReason: "New parents build sleep-focused boards before baby arrives and return to them nightly in the first 3 months.",
+        pinKeywords: "newborn sleep routine, baby sleep tips, how to get newborn to sleep, gentle sleep training, first time mom",
+        liPost:
+`After nearly a decade in pediatric health and now building Rooted, I am convinced of one thing: the biggest threat to new-parent wellbeing isn't the baby — it's the expectation that something is wrong when the baby behaves like a baby.
+
+The 8-week "sleep through the night" myth circulating in parenting content isn't just inaccurate — it is measurably harmful to postnatal mental health. Newborns wake because of biology (stomach capacity, circadian maturation), not because of a failure of parenting.
+
+Three things we built Rooted around:
+1. Replace arbitrary benchmarks with developmental reality — waking is normal and expected.
+2. Give parents a repeatable framework (E.A.S.Y.) that works with the baby's biology instead of against it.
+3. Build in mandatory parent rest — you cannot soothe what you do not have the energy to hold.
+
+If you're building products for parents, the job isn't to give them one more checklist. It's to remove the shame from the checklists they already have.
+
+What piece of parenting advice did more harm than good for you?`,
+        liHashtags: "#Parenting #Postpartum #MaternalHealth",
+        fbPost:
+`Quick reminder for every new parent scrolling at 3AM 🧡
+
+If your newborn isn't sleeping through the night? That is NORMAL. Not a failure on your part. Not a sign you're doing something wrong.
+
+The routine that saved us was E.A.S.Y. (Eat, Activity, Sleep, You time) + learning that 30-second 'drowsy but awake' window. No cry-it-out, no fancy gadgets.
+
+I put a free week-by-week sleep guide on Rooted — link in the first comment, mama.
+
+What finally worked for your little one? 👇`,
+        fbTime: "⏰ Suggested: Thursday 8–10 PM ET (US parents after bedtime) / 6–8 AM PKT morning scroll. Parents are most receptive to content after bedtime on weeknights."
+      }
+    : {
+        brand: "NOVA",
+        audience: "ambitious creators & entrepreneurs",
+        topic: "YouTube growth & content creation",
+        igCaption:
+`You are one YouTube video away from changing your whole trajectory — and you're about to miss it.
+
+Most creators post for six months, get zero views, and quit.
+They blame the algorithm. They buy courses. They rebrand.
+And they never fix the one thing that actually matters: the first three seconds.
+
+Your hook isn't a question. It isn't "have you ever wondered." It's a one-sentence statement that opens a loop in a stranger's brain.
+Combine that with a three-point structure (problem → system → one thing they didn't know) and a thumbnail with no more than six bold words — and your views change.
+
+I built NOVA so creators can script, audit and ship faster.
+Free hook template linked in bio.
+
+What's your next video about? Drop the hook in the comments 👇`,
+        igHashtags: "#youtubetips #contentcreation #creatoreconomy #videomarketing #youtubealgorithm #growonyoutube #contentstrategy #novachannel #thumbnail #creatorlife",
+        igStory1: "STOP OPENING\nYOUR VIDEOS\nWITH A QUESTION",
+        igStory2: "Hook = statement.\n3 points, 1 CTA.\nThumbnail < 6 words.",
+        igStory3: "Link in bio\n→ Free hook\n  template",
+        threadHook: "You are one hook away from changing your YouTube trajectory. The reason your videos aren't going viral has nothing to do with the algorithm — and everything to do with the first three seconds. A thread:",
+        threadT2: "2/5\nMistake #1: Opening with a question.\n\n'Have you ever wondered why...' is the fastest way to lose 60% of your audience before you even start. Questions let people think. Statements create tension. Tension keeps them watching.",
+        threadT3: "3/5\nA real hook is one sentence that:\n- Names a specific person\n- States a painful or surprising truth\n- Promises a payoff in THIS video\n\nIf it doesn't do all three, rewrite it. Do this before you touch the thumbnail.",
+        threadT4: "4/5\nThen structure the video in three beats: fastest point first, real secret second, 'one thing nobody tells you' third. End with ONE single CTA — not five. Asking for a like AND a sub AND a comment AND a click gives them permission to do nothing.",
+        threadT5: "5/5\nThe creators growing fastest spend MORE time on the hook and thumbnail than the rest of the video combined. That should tell you everything.\n\nFree hook template: https://novachannel.app\n\nRT for a creator stuck at 100 views.",
+        pinTitle: "YouTube Hook Template That Stops the Scroll (Free Script PDF)",
+        pinDesc: "Free YouTube hook template and 3-point video script structure that grows channels fast. Learn how to write a stop-the-scroll opening line, structure a viral video, and design a high-CTR thumbnail that gets clicks in the feed. YouTube growth for new creators, content strategy, video marketing.",
+        boardName: "YouTube Growth & Content Creator Tips",
+        boardReason: "Pinners save script and hook templates to creator-tip boards and come back to them before every upload.",
+        pinKeywords: "youtube script template, video hook ideas, how to grow on youtube, content creator tips, thumbnail ideas",
+        liPost:
+`After building content systems that have helped channels cross 100K subscribers, I'm convinced of one unpopular thing: your first three seconds matter more than the rest of your video combined.
+
+Most creators spend the least time on the hook and the most time on the middle — exactly the opposite of what the algorithm rewards. The hook is the product. The rest of the video is the delivery mechanism.
+
+Three non-obvious rules I see working consistently:
+1. Never open with a question. Questions let people think. Statements create open loops.
+2. Stack your points fastest-to-most-powerful. Ego puts the "best" point last. Retention rewards you for the opposite.
+3. Ask for exactly one CTA. More than one request gives viewers permission to do nothing at all.
+
+If you're just starting, I built a free hook template at NOVA that writes your opening line with you.
+
+What's the one thing that finally moved the needle on your channel?`,
+        liHashtags: "#ContentCreation #YouTube #CreatorEconomy",
+        fbPost:
+`Let's be real — if your videos are getting 40 views it's almost never the algorithm. It's the first three seconds.
+
+Stop opening with "hey guys what's up today I wanted to talk about..."
+Open with a STATEMENT that makes people stop scrolling.
+One sentence. Bold. Specific. No hedging.
+
+I put a free hook template in NOVA that writes this for you — link in comments.
+
+Drop your best hook below and I'll give you honest feedback 👇`,
+        fbTime: "⏰ Suggested: Tuesday 1–3 PM ET — creators and entrepreneurs engage during midweek work breaks, when motivation for new systems is highest."
+      };
+
+  // Build tweet thread body with char-count safety
+  const tweets = [niche.threadHook, niche.threadT2, niche.threadT3, niche.threadT4, niche.threadT5];
+
+  return `[SOCIAL AGENT] ACTIVATED — Cross-platform content package locked in for **${niche.brand}** (${niche.topic}). Copy, paste, post, Anwaar.
+
+## ▸ INSTAGRAM
+**CAPTION**
+
+${niche.igCaption}
+
+**HASHTAGS (10)**
+\`${niche.igHashtags}\`
+
+**STORIES (3 slides)**
+- **SLIDE 1:** "${niche.igStory1}"  *(visual: bold orange text on dark, face reacting in shock/surprise. Add a SWIPE UP / LINK sticker.)*
+- **SLIDE 2:** "${niche.igStory2}"  *(visual: phone screen recording or quick text card with an emoji.)*
+- **SLIDE 3:** "${niche.igStory3}"  *(visual: product/CTA screen. Add a POLL sticker: "Trying this? ✋" or LINK sticker.)*
+
+---
+
+## ▸ TWITTER / X
+**THREAD (5 tweets)**
+
+\`\`\`text
+${tweets.map((tw, i) => `${i + 1}/5\n${tw}`).join("\n\n")}
+\`\`\`
+
+---
+
+## ▸ PINTEREST
+**PIN TITLE**
+**${niche.pinTitle}**
+
+**PIN DESCRIPTION** (~300 chars)
+${niche.pinDesc}
+
+**BOARD SUGGESTION**
+"**${niche.boardName}**" — ${niche.boardReason}
+
+**PINTEREST KEYWORDS (5)**
+\`${niche.pinKeywords}\`
+
+---
+
+## ▸ LINKEDIN
+**POST** (~200 words)
+
+${niche.liPost}
+
+${niche.liHashtags}
+
+---
+
+## ▸ FACEBOOK
+**POST** (~100 words, conversational)
+
+${niche.fbPost}
+
+**SUGGESTED POSTING TIME**
+${niche.fbTime}
+
+Content package ready for scheduling — drop it into your scheduler, Anwaar.`;
+}
+
+// ══════════════════════════════════════════════════
 // MAIN EXPORT
 // ══════════════════════════════════════════════════
 export default function NOVA() {
@@ -1603,7 +1925,7 @@ export default function NOVA() {
         setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
         addFeed(agent, `SEO audit complete — ${target.slice(0,28)}`,"SUCCESS");
         addLog(`[${agent}] SEO report delivered.`);
-      } else if (!ANTHROPIC_API_KEY && agent === "YOUTUBE AGENT") {
+      } else if (!ANTHROPIC_API_KEY && agent === "YOUTUBE") {
         const topic = userCmd
           .replace(/youtube|script|video|shorts|hook|thumbnail|write|make|create|generate|for|please|about|on(?!t)|me/gi, " ")
           .replace(/\s+/g, " ")
@@ -1613,6 +1935,16 @@ export default function NOVA() {
         setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
         addFeed(agent, `Script package ready — ${topic.slice(0,26)}`, "SUCCESS");
         addLog(`[${agent}] YouTube script package delivered.`);
+      } else if (!ANTHROPIC_API_KEY && agent === "SOCIAL") {
+        const topic = userCmd
+          .replace(/instagram|twitter|linkedin|pinterest|facebook|\bfb\b|\bx\b|social|media|caption|post|tweet|thread|pin|reel|story|write|make|create|generate|for|please|about|on(?!t)|me/gi, " ")
+          .replace(/\s+/g, " ")
+          .trim() || "scholarics gpa launch";
+        const reply = buildDemoSocialReport(topic);
+        await new Promise(r => setTimeout(r, 1500));
+        setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
+        addFeed(agent, `Socials ready — ${topic.slice(0,28)}`, "SUCCESS");
+        addLog(`[${agent}] Cross-platform social package delivered.`);
       } else if (!ANTHROPIC_API_KEY) {
         await new Promise(r=>setTimeout(r,700));
         setMessages(p=>[...p,{role:"assistant",content:"[NOVA] Anthropic API key not configured. Open src/App.jsx and set ANTHROPIC_API_KEY to enable live AI responses. The SEO AGENT demo mode is available — try: \"seo audit scholarics.com\"",agent:"SYSTEM"}]);
