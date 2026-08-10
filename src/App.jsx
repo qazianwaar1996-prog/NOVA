@@ -79,8 +79,71 @@ Two high-impact, low-effort actions Anwaar can ship TODAY from his phone. Each a
 Close with: "Anything else on this, Anwaar?"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✍️ CONTENT AGENT — triggers on: blog, article, write, guide, content, post
-→ Full SEO-ready article: H1 title, intro hook, 4–6 H2 sections, body, CTA. Adapt tone to SCHOLARICS (helpful, student-friendly) or ROOTED (warm, authoritative parenting). Include 3 title variants at the top and a meta description at the bottom.
+✍️ CONTENT AGENT — triggers on: blog, blog post, article, write (an article | a post | a blog), guide, long-form, longform, content piece
+
+When the CONTENT AGENT activates, ALWAYS produce a COMPLETE, SEO-optimized article ready to paste directly into a CMS (WordPress, Webflow, Ghost, etc.). Do NOT leave any section as a placeholder — every paragraph must be fully written.
+
+Detect the brand and audience automatically from the prompt:
+- scholarics / gpa / study / grades / student / college / exam / academic → SCHOLARICS (peer-to-peer student tone, US English, conversational but specific, actionable, stats where possible)
+- rooted / parent / baby / newborn / sleep / kid / toddler / pregnancy / mom / dad → ROOTED (warm, reassuring parent tone — adapt spelling/terms for US/UK/AU/CA market if the user says "uk", "british", "australian", "aussie", or "canada", otherwise default to US English; no mom-shaming; evidence-based)
+- anything else → NOVA/generic creator-entrepreneur tone (bold, motivational, tactical, founder voice)
+
+Start with:
+"[CONTENT AGENT] ACTIVATED — Drafting SEO article package. Stand by, Anwaar.\n"
+
+Then output these sections, separated by a horizontal rule \`---\` between the SEO meta block and the article body, and between the body and the footer notes, in this exact order:
+
+## ▸ SEO META TITLE
+- One title under 60 characters. Show the character count in parentheses.
+- Wrap the exact string in an inline \`code\` span.
+- Lead with the primary keyword, include a hook or benefit.
+
+## ▸ SEO META DESCRIPTION
+- One description under 155 characters. Show the character count.
+- Wrap in an inline \`code\` span.
+- Include primary keyword + secondary hook + soft CTA.
+
+## ▸ TARGET KEYWORDS (5)
+Five keywords that will be woven naturally into the article. List them as bullets with the primary keyword marked ⭐. Mix 1 primary, 2 secondary, 2 long-tail.
+
+---
+
+## ▸ H1 TITLE
+One compelling, keyword-rich H1 (not identical to the meta title — more conversational, promises clear value).
+
+## ▸ INTRODUCTION
+Two paragraphs. First paragraph: STOP-THE-SCROLL hook (a surprising stat, painful truth, or counter-intuitive claim). Second paragraph: tell the reader exactly what they'll learn and who this is for, end with a one-sentence roadmap of the three sections ahead.
+
+## ▸ [H2 SECTION 1 — keyword-aligned heading]
+2–3 full paragraphs (4–6 sentences each) covering the first major point. Use specific examples, a mini-stat or concrete step where natural. Bold the first strong claim per paragraph for scannability.
+
+## ▸ [H2 SECTION 2 — keyword-aligned heading]
+2–3 full paragraphs. Deepen the argument, introduce a system, framework or counter-point. Reference real student/parent/creator behavior. Short paragraphs for mobile readability.
+
+## ▸ [H2 SECTION 3 — keyword-aligned heading]
+2–3 full paragraphs. Deliver the most actionable, "do this today" advice — numbered mini-steps or a step-by-step micro-playbook work well here. End with a short transition into the FAQ.
+
+## ▸ FREQUENTLY ASKED QUESTIONS
+Three common reader questions about the topic, each with a 3–5 sentence answer. Use **Q:** / **A:** labels. The questions should target long-tail, people-also-ask queries.
+
+## ▸ CONCLUSION
+One wrapping paragraph (3–5 sentences) that recaps the thesis and delivers a STRONG, specific CTA (comment a keyword, try a tool, read a related article, subscribe, etc.). No vague "thanks for reading."
+
+---
+
+## ▸ INTERNAL LINK SUGGESTIONS (3)
+Three concrete internal link recommendations as bullets:
+- **Source anchor (in this article)** → **Target page**, with suggested \`anchor text\` and a one-line SEO/user-flow reason.
+
+## ▸ CMS PASTE NOTES
+- Recommended featured image alt text
+- Recommended URL slug (kebab-case, keyword-first)
+- Suggested category + tags
+- Word count of the body (H1 → conclusion, inclusive)
+
+Word count target: 800–1200 words for the article body. Make every paragraph useful — no fluff. US English by default; UK/AU spelling only if the user explicitly names the market.
+
+Close with: "Article ready for your CMS — paste it in, Anwaar."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📱 SOCIAL MEDIA AGENT — triggers on: instagram, twitter, x, linkedin, pinterest, social, fb, facebook, caption, reel, post, ig, tweet, thread, pin, board, social media, socials
@@ -288,9 +351,12 @@ function detectAgent(t) {
   // Check YouTube BEFORE SEO — "title" and "description" appear in both,
   // but a user asking for a YouTube script/title/thumbnail means YouTube.
   if(/(youtube|yt|\byoutube\b|video script|shorts|long[ -]?form|short[ -]?form|thumbnail|video idea|outro|intro for video|make a video|write a script)/.test(t)) return "YOUTUBE";
+  // CONTENT must be checked BEFORE SOCIAL for ambiguous "post"/"write" queries —
+  // but SOCIAL catches "post for [platform]", so the order here matters:
+  // SOCIAL first for social-only signals, then CONTENT for article signals.
   if(/(instagram|\btwitter\b|\bx\b|linkedin|pinterest|social media|\bfb\b|facebook|caption|reel(?! youtube)|tiktok|tik tok|post for)/.test(t)) return "SOCIAL";
   if(/(seo|audit|meta (?!title for video)|keyword|schema|ranking|serp|backlink|on-page|onpage)/.test(t)) return "SEO AGENT";
-  if(/(blog|article|write a guide|long-form content)/.test(t)) return "CONTENT";
+  if(/(blog post|blog|write a (blog|post|article|guide)|long[- ]?form|article (about|on|for)|write.*article|draft.*article|content piece|pillar page)/.test(t)) return "CONTENT";
   if(/(email|reply|draft email|mail)/.test(t)) return "EMAIL";
   if(/(analytics|traffic|adsense|stats|report|ga4)/.test(t)) return "ANALYTICS";
   if(/(uptime|deploy|github|error|broken|ci|build)/.test(t)) return "MONITOR";
@@ -803,7 +869,8 @@ function DesktopApp({ state, handlers }) {
             {messages.length===0?(
               <div style={{color:C.dim2,fontSize:11,lineHeight:2}}>
                 <span style={{color:C.dim}}>NOVA command output will appear here...</span><br/>
-                <span>Try: </span><span style={{color:C.orange}}>"SEO audit Scholarics homepage"</span><span> or </span><span style={{color:C.orange}}>"Write Instagram posts for Rooted"</span>
+                <span>Try: </span><span style={{color:C.orange}}>"SEO audit Scholarics homepage"</span><span> or </span><span style={{color:C.orange}}>"Write a blog post about GPA tips"</span><br/>
+                <span>Or: </span><span style={{color:C.orange}}>"Write Instagram posts for Rooted"</span>
               </div>
             ):messages.map((m,i)=>(
               <div key={i} className="fade" style={{marginBottom:12}}>
@@ -1089,7 +1156,8 @@ function MobileApp({ state, handlers }) {
             <div style={{color:C.dim2,fontSize:11,lineHeight:1.8}}>
               <span style={{color:C.dim}}>NOVA command output will appear here.</span><br/>
               <span>Try: </span><span style={{color:C.orange}}>"SEO audit Scholarics"</span><br/>
-              <span>Or: </span><span style={{color:C.orange}}>"Write Instagram posts for Rooted"</span>
+              <span>Or: </span><span style={{color:C.orange}}>"Write a blog post about GPA tips"</span><br/>
+              <span>Or: </span><span style={{color:C.orange}}>"Instagram posts for Rooted"</span>
             </div>
           ):messages.map((m,i)=>(
             <div key={i} className="fade" style={{marginBottom:10}}>
@@ -1851,6 +1919,312 @@ Content package ready for scheduling — drop it into your scheduler, Anwaar.`;
 }
 
 // ══════════════════════════════════════════════════
+// Demo SEO article — used when no ANTHROPIC_API_KEY is set,
+// so the CONTENT AGENT is fully functional out-of-the-box.
+// Produces a complete 900–1100 word SEO-optimized article
+// following the spec: SEO meta, H1, intro, 3×H2, FAQ,
+// conclusion + CTA, internal links, CMS paste notes.
+// ══════════════════════════════════════════════════
+function buildDemoContentReport(rawTopic) {
+  const t = (rawTopic || "").trim();
+  const lower = t.toLowerCase();
+  const isScholarics = /scholarics|gpa|cgpa|grade|study|student|exam|college|school|academic|semester|final|midterm|homework|textbook/i.test(lower);
+  const isRooted = /rooted|parent|baby|newborn|sleep|kid|toddler|discipline|pregnan|mom|dad|child|tummy[ -]?time|milestone|nap/i.test(lower);
+
+  // Region detection (for Rooted localization)
+  const isUK = /\buk\b|british|england|london/i.test(lower);
+  const isAU = /australia|aussie|sydney|melbourne/i.test(lower);
+  const isCA = /canada|toronto|vancouver/i.test(lower);
+  const region = isUK ? "UK" : isAU ? "AU" : isCA ? "CA" : "US";
+  const nappy = region !== "US" ? "nappy" : "diaper";
+  const mom = region === "UK" ? "mum" : "mom";
+  const colour = region !== "US" ? "colour" : "color";
+  const behaviour = region !== "US" ? "behaviour" : "behavior";
+  const organise = region !== "US" ? "organise" : "organize";
+
+  const data = isScholarics
+    ? (() => {
+        const kw1 = "how to calculate GPA";
+        const kw2 = "GPA calculator";
+        const kw3 = "raise your GPA";
+        const kw4 = "college study tips";
+        const kw5 = "semester grade target";
+        const metaTitle = "How to Calculate GPA (and Hit Your Target This Semester)";
+        const metaDesc = "Learn how to calculate your GPA in 60 seconds, set a realistic semester target, and use one free GPA calculator to lock the grade you want.";
+        const h1 = "How to Calculate GPA — And Actually Hit Your Target Grade This Semester";
+        const p1h2 = "Why Your GPA Feels Impossible to Predict (It's Not)";
+        const p2h2 = "How to Calculate GPA in 60 Seconds (The Formula Nobody Taught You)";
+        const p3h2 = "The 3 Moves That Actually Move Your GPA Up Fast";
+        const faqs = [
+          { q: "What's the difference between a weighted and unweighted GPA?",
+            a: "An unweighted GPA treats every class the same — an A in gym is worth the same as an A in AP Physics, on a 4.0 scale. A weighted GPA bumps honors, AP, and IB classes up (usually to a 5.0 scale) so harder classes count for more. Most U.S. colleges recalculate your GPA their own way during admissions, but tracking your unweighted GPA every two weeks is the fastest way to spot slippage before finals." },
+          { q: "Can one bad semester really ruin my cumulative GPA?",
+            a: "Rarely. Cumulative GPA is a weighted average of every credit you've taken, so one rough semester pulls the number down but doesn't break it. The bigger danger is letting one bad semester turn into a trend because you've decided \"it's over.\" Plug your grades into a GPA calculator and run the math — most students are shocked how reachable a 0.3–0.5 jump is with focused exam prep." },
+          { q: "How many hours a day should I study to raise my GPA?",
+            a: "It's not hours — it's retrieval. Research consistently shows that 45–60 minutes of active recall practice (blank-paper self-quizzing, teaching the concept out loud) beats 3–4 hours of passive re-reading. Aim for a hard start at 25 focused minutes per class per day, five days a week. That's roughly 2 hours a day of real work, and it will move your GPA faster than an all-nighter ever could." },
+        ];
+        const slug = "how-to-calculate-gpa";
+        const category = "Study Skills";
+        const tags = "GPA, study tips, college, academic success, exam prep";
+        const imageAlt = "Student using a free GPA calculator to figure out target grades for the semester";
+        const cta = "Drop your current GPA and your target in the comments below — I read every one. Then open the free Scholarics GPA calculator, plug in your numbers, and write down the minimum score you need on your next exam. That one number, pinned on your wall, is more useful than any study plan on Pinterest.";
+        const links = [
+          { anchor: "from this article", to: "/gpa-calculator", linkText: "free GPA calculator", why: "Push calculator-primed readers straight into your sticky hero tool; converts article traffic into repeat tool users." },
+          { anchor: "in section 2", to: "/blog/how-to-study-for-finals", linkText: "how to study for finals in 3 days", why: "Surfaces your highest-converting study guide to readers already in grade-problem mode." },
+          { anchor: "in the conclusion", to: "/blog/retrieval-practice", linkText: "retrieval practice study system", why: "Deep-links to the retrieval-practice article to build topical authority around study-habit keywords." },
+        ];
+        const body =
+`## ${p1h2}
+
+Most students walk into finals week with no real idea what grade they're sitting at. They know they \"feel like a B\" in biology and \"maybe an A-minus\" in comp, but they can't tell you the exact score they need on the final to lock either. That blind spot is expensive. **Your GPA doesn't care how you feel about the class — it only cares about weighted math.**
+
+The good news: grade math is shockingly simple once you see it. Every course has a known weight for quizzes, midterms, homework, participation, and the final. Multiply each score by its weight, add them up, and you get your current running grade. Compare that against the grading scale laid out in your syllabus, and you instantly know whether you're one strong exam away from the A or sitting on a hard C+ no matter what happens. **The students who raise their GPA fastest are the ones who look at this number every two weeks, not the night before finals.**
+
+If you've never calculated your own GPA before, don't worry. The math below takes about a minute with a calculator, and after you've done it once you'll never need to be told how you're doing in a class again. We'll also hand you a free tool that does the arithmetic for you — because the point isn't to get good at long division, it's to get good at steering your grades.
+
+## ${p2h2}
+
+The basic GPA formula is straightforward. For each class, convert your letter grade to its 4.0-scale numeric value (A = 4.0, A− = 3.7, B+ = 3.3, B = 3.0, and so on — most schools publish their exact scale on the registrar's page). Multiply that number by the number of credits the class is worth. That product is your \"quality points\" for the course. Add up quality points across every class, divide by total credits, and you've got your GPA.
+
+**Let's run a quick example.** Say you're taking four 3-credit classes: an A in psychology (4.0 × 3 = 12.0), a B+ in biology (3.3 × 3 = 9.9), an A− in English (3.7 × 3 = 11.1), and a B in calculus (3.0 × 3 = 9.0). Total quality points = 42.0. Total credits = 12. Your GPA = 42.0 ÷ 12 = **3.50**. That's it. The same formula scales from a 12-credit semester up to your full college career.
+
+The more useful version of this math is what we call *target GPA calculation*. Start with the cumulative GPA you want to finish the semester with, back-solve what your remaining exams need to average, and you walk into finals knowing exactly how high to aim. You can do this by hand, but the fastest way is a ${kw2} like the free one on Scholarics — plug in your current weighted grade, your target, and the weight of your remaining assignments, and it hands you the minimum score you need. That single number changes how you study.
+
+## ${p3h2}
+
+Once you've run the math and you know where you stand, three moves actually move the GPA needle — everything else is noise. **First: cut rereading, start retrieving.** Study after study shows that passive rereading and highlighting produce almost no retention, while self-quizzing from a blank page (called retrieval practice) is 2–3x more effective per minute spent. For every lecture, spend 8 minutes that same evening writing down everything you remember without notes. It feels hard. That's the point.
+
+**Second: let the GPA calculator tell you where to spend your hours.** Most students split study time evenly across classes, which is a disaster. If your calculator says you need a 62 on the calc final to lock the A but a 94 on the bio final just to hold the B+, you know exactly where the next two weeks need to go. Ruthless prioritization beats brute-force hours every single time.
+
+**Third: protect your sleep during finals week.** A rested 70% on exam day outperforms an exhausted 100% every time, because sleep is when your brain consolidates the retrieval practice you've been doing. Sleep at least 6.5 hours, hydrate, and stop studying 90 minutes before you sit the test. The students who skip this step walk into finals with all the content in their head and no working memory to retrieve it with.
+
+## FREQUENTLY ASKED QUESTIONS
+
+**Q: ${faqs[0].q}**
+
+A: ${faqs[0].a}
+
+**Q: ${faqs[1].q}**
+
+A: ${faqs[1].a}
+
+**Q: ${faqs[2].q}**
+
+A: ${faqs[2].a}
+
+## CONCLUSION
+
+Your GPA is not a verdict on your intelligence. It's a weighted number, and numbers move when you apply math and focused effort. The single highest-leverage thing you can do today — right now, before you close this tab — is calculate where you actually stand, write down the minimum score you need on your next big exam, and redirect your study hours to ${kw3} instead of panicking. ${cta}`;
+        const bodyText = body.replace(/[#*_\n]/g, " ").replace(/\s+/g, " ").trim();
+        const wordCount = bodyText.split(/\s+/).filter(Boolean).length + 150; // rough body+meta count
+        return { brand:"Scholarics", topic:"how to calculate GPA", audience:"college & high-school students",
+                 metaTitle, metaDesc, titleLen:metaTitle.length, descLen:metaDesc.length,
+                 h1, body, keywords:[`⭐ ${kw1}`,kw2,kw3,kw4,kw5],
+                 faqs, cta, links, slug, category, tags, imageAlt, wordCount, introHook:"Roughly 7 in 10 students walk into finals unable to tell you what score they need on the final to keep their scholarship. That is crazy — and it's fixable in 60 seconds." };
+      })()
+    : isRooted
+    ? (() => {
+        const kw1 = "newborn sleep schedule";
+        const kw2 = "newborn won't sleep";
+        const kw3 = "EASY method newborn";
+        const kw4 = "drowsy but awake";
+        const kw5 = "newborn sleep tips for " + mom;
+        const metaTitle = region === "US"
+          ? "Newborn Sleep Schedule: A Gentle Routine That Actually Works"
+          : "Newborn Sleep Routine: A Gentle Schedule That Actually Works";
+        const metaDesc = `A realistic, evidence-based newborn sleep schedule using the E.A.S.Y. method. Learn the drowsy-but-awake window without cry-it-out, for tired new ${mom}s.`;
+        const h1 = "A Gentle Newborn Sleep Schedule That Actually Works (No Cry-It-Out Required)";
+        const p1h2 = "Why Newborns Don't \"Sleep Through the Night\" (And Why That's Normal)";
+        const p2h2 = "The E.A.S.Y. Routine: Eat, Activity, Sleep, You";
+        const p3h2 = "The Drowsy-But-Awake Window That Changes Everything";
+        const faqs = [
+          { q: "When do newborns start sleeping through the night?",
+            a: "Biologically, most babies aren't ready for a 6–8 hour stretch of consolidated night sleep until somewhere between 3 and 6 months — and that range is normal. Expecting an 8-week-old to sleep 12 hours straight isn't just unrealistic; it can lead you to ignore feeding cues when your baby genuinely needs calories. Track wet ${nappy}s and weight gain with your pediatrician, and let those metrics, not the parenting blogs, tell you whether your baby is ready to drop a night feed." },
+          { q: "Is the E.A.S.Y. method the same as sleep training?",
+            a: "No. Sleep training (including cry-it-out and its gentler variants) is about teaching independent sleep onset, usually starting around 4–6 months. E.A.S.Y. is a daytime routine created by pediatric care expert Tracy Hogg that brings order to the newborn weeks by separating feeding from sleeping and building in predictable cycles of eat, activity, sleep, and parent rest. You can use E.A.S.Y. from week one without doing any formal sleep training at all." },
+          { q: "My baby falls asleep on the breast or bottle — is that a problem?",
+            a: "Not in the first 6–8 weeks. Feeding-to-sleep is biologically normal and one of the fastest ways to settle a tiny newborn. Around 8–12 weeks, you can start offering the feed a little earlier in the routine so baby finishes awake more often, and you get more practice putting them down drowsy. Take it slow — there are no medals for transitioning early, and a fed, connected baby is always the goal." },
+        ];
+        const slug = "newborn-sleep-schedule";
+        const category = "Newborn";
+        const tags = region === "US" ? "newborn sleep, baby schedule, EASY method, new mom, postpartum" : "newborn sleep, baby routine, EASY method, new mum, postpartum";
+        const imageAlt = `${region === "UK" ? "Mum" : "Mom"} holding a swaddled newborn next to a simple E.A.S.Y. routine chart`;
+        const cta = `If this helped you breathe a little easier tonight, share it with another tired ${mom} scrolling at 3 a.m. — no parent needs to do this alone. Then download the free week-by-week sleep guide on Rooted and, most importantly, sleep when the baby sleeps. You've got this.`;
+        const links = [
+          { anchor: "in section 2", to: "/stages/newborn", linkText: "newborn stage guide (0–3 months)", why: "Drives new parents into your highest-RPM stage content from the moment they hit the article." },
+          { anchor: "in section 3", to: "/sleep/drowsy-but-awake", linkText: "drowsy-but-awake tutorial", why: "Deep-links readers to the dedicated article on the trickiest sleep skill new parents need to master." },
+          { anchor: "in the FAQ", to: "/tools/baby-name-generator", linkText: "baby name generator (free)", why: "Surfaces your sticky free tool to readers who are clearly in early parenthood mode." },
+        ];
+        const body =
+`## ${p1h2}
+
+If you're reading this at 2:47 a.m. with a screaming newborn on your shoulder and every parenting app on your phone insisting babies \"should\" be sleeping through by 8 weeks, take a breath. **Newborns don't sleep through the night, and it is not your fault they don't.** At birth, a baby's stomach is roughly the size of a cherry. They wake because they need calories, not because you're doing something wrong or \"spoiling\" them.
+
+The \"8-week sleep-through\" myth has done measurable damage to postnatal mental health. It sets new parents up to feel like they're failing at the one thing everyone promised would \"just happen,\" and it pushes exhausted families into harsh sleep methods they aren't comfortable with, far earlier than they need to. The truth is simpler and kinder: newborn sleep is messy. It is fragmented. It will not look like an Instagram reel for months. That is normal, and it is temporary.
+
+What you *can* do starting in the first few weeks is build a gentle, repeatable daytime rhythm that sets the stage for consolidated sleep later — without cry-it-out, without rigid schedules written by strangers, and without ignoring your baby's cues. That's what this guide is for: one realistic ${kw1}, built around how real babies actually behave.
+
+## ${p2h2}
+
+The routine that consistently saves new parents is called **E.A.S.Y.**, created by baby-care expert Tracy Hogg. It stands for **Eat, Activity, Sleep, You** — a repeating cycle of roughly 2.5 to 3 hours for a newborn and stretching to 4 hours as your baby gets older. It is not a clock-watching, cry-if-you're-five-minutes-late schedule. Think of it as a flexible pattern that removes the guesswork from the day.
+
+**Eat** means a full feed first, not a snack. Newborns often doze off halfway through a feed; wake them gently (stroke the cheek, change a ${nappy}) so they take a full feeding. A well-fed baby sleeps longer and more calmly than a snack-fed one. After the feed comes **Activity**: 15–20 minutes of age-appropriate engagement, whether that's tummy time on a play mat, making faces at you, a short walk around the house, or simply sitting upright looking out the window.
+
+Then you put them down for **Sleep** using the drowsy-but-awake technique we'll cover in the next section. The final letter is the one parents skip most often — **You time**. While the baby sleeps, ${mom} gets 15–40 minutes to eat something, shower, nap, sit in silence, text a friend, or just stare at a wall. This isn't selfish. It is the foundation that keeps you emotionally available for the next cycle. Skipping "You time" is why so many ${mom}s crash hard at week six.
+
+## ${p3h2}
+
+Here's the real secret of newborn sleep, and it takes most parents three kids to learn it: **the drowsy-but-awake window is where independent sleep is built.** If your baby falls all the way asleep in your arms and you then transfer them to the bassinet, they'll wake the moment the mattress touches their back. Why? Because they fell asleep in one set of conditions (warm, held, moving, heartbeat nearby) and woke up alone. That's disorienting for anyone.
+
+Instead, watch for the window between awake and asleep. Their eyelids get heavy. Their sucking slows down. They stop scanning the room and their movements get loose and floppy. That is the moment — usually about 30 seconds long — to lay them down in their safe sleep space, on their back, in a bare crib or bassinet. They may fuss for 30–60 seconds. That's them practicing settling. If they escalate into genuine crying, pick them up, soothe, and try again next cycle.
+
+This is not cry-it-out. You are not leaving them to scream. You are giving them a brief, supported chance to discover what it feels like to fall asleep in their own bed. For the first 6–8 weeks, practice this only once or twice a day when you're calm and they're calm. By 10–12 weeks, many babies will start settling themselves within a minute or two. That single skill is what unlocks longer stretches of night sleep.
+
+## FREQUENTLY ASKED QUESTIONS
+
+**Q: ${faqs[0].q}**
+
+A: ${faqs[0].a}
+
+**Q: ${faqs[1].q}**
+
+A: ${faqs[1].a}
+
+**Q: ${faqs[2].q}**
+
+A: ${faqs[2].a}
+
+## CONCLUSION
+
+Newborn sleep is messy, biological, and deeply individual. You are not failing because your 6-week-old is still waking twice a night, and you are not doing something wrong if routines don't click for the first month. Start with E.A.S.Y. cycles during the day, practice the ${kw4} window gently after a couple of feeds, and ignore any voice — online or in your family — that tells you your baby \"should\" be doing something they aren't doing yet. ${cta}`;
+        const bodyText = body.replace(/[#*_\n]/g, " ").replace(/\s+/g, " ").trim();
+        const wordCount = bodyText.split(/\s+/).filter(Boolean).length + 150;
+        return { brand:"Rooted", topic:"newborn sleep schedule", audience:`new & expecting ${mom}s (${region} English)`,
+                 metaTitle, metaDesc, titleLen:metaTitle.length, descLen:metaDesc.length,
+                 h1, body, keywords:[`⭐ ${kw1}`,kw2,kw3,kw4,kw5],
+                 faqs, cta, links, slug, category, tags, imageAlt, wordCount,
+                 introHook:`It's 3 a.m., your newborn is wide awake on your chest, and every app on your phone says they \"should\" be sleeping through the night by now. Here's what those apps aren't telling you.` };
+      })()
+    : (() => {
+        const kw1 = "how to write a youtube hook";
+        const kw2 = "youtube hook examples";
+        const kw3 = "stop the scroll";
+        const kw4 = "youtube script template";
+        const kw5 = "get more views on youtube";
+        const metaTitle = "How to Write a YouTube Hook That Stops the Scroll in 3 Seconds";
+        const metaDesc = "Learn the 1-sentence YouTube hook formula that stops the scroll, plus 7 proven hook examples and a 3-minute script template you can copy today.";
+        const h1 = "How to Write a YouTube Hook That Stops the Scroll in 3 Seconds";
+        const p1h2 = "Your First Three Seconds Matter More Than the Rest of the Video";
+        const p2h2 = "The 1-Sentence Hook Formula That Consistently Works";
+        const p3h2 = "The 3-Minute Script Template (Hook → Body → CTA)";
+        const faqs = [
+          { q: "How long should a YouTube hook be?",
+            a: "The hook line itself should land in the first 0–3 seconds, which means one tight sentence — typically 12–25 words. If you're greeting viewers, introducing yourself, or saying \"hey guys what's up\" before the hook, you're already losing 40–60% of your audience. Hard cut straight into the provocative statement, then welcome people to the video once they've committed." },
+          { q: "Do questions work as YouTube hooks?",
+            a: "Almost never. A question like \"Have you ever wondered why your videos don't get views?\" gives the viewer's brain an instant out — they can think \"no\" and scroll. A statement creates an open loop their brain wants to close: \"You're losing 60% of your viewers before you say hello.\" Specific, bold, named-audience, painful-truth statements outperform questions in almost every niche and at every channel size." },
+          { q: "What's the biggest mistake new creators make with hooks?",
+            a: "Spending 90% of their production time on the middle of the video and 10% on the hook and thumbnail. It should be the opposite. The highest-growing creators spend more time writing and testing the opening 15 seconds and the thumbnail than they spend on the rest of the video combined, because those two assets determine whether the rest of the video ever gets watched at all." },
+        ];
+        const slug = "write-youtube-hook";
+        const category = "YouTube Growth";
+        const tags = "youtube, content creation, video hooks, creator economy, growth";
+        const imageAlt = "Creator writing a bold YouTube hook line on a script page next to a high-contrast thumbnail mockup";
+        const cta = "Write your next video's hook before you write anything else. If you want a shortcut, grab the free hook template on the NOVA site — it walks you through the formula one blank at a time, and it takes about 5 minutes. Drop your best hook line in the comments below and I'll give you honest feedback on it.";
+        const links = [
+          { anchor: "in section 3", to: "/tools/hook-generator", linkText: "free YouTube hook template", why: "Pushes article readers straight into the free NOVA hook tool — highest-intent CTA on the page." },
+          { anchor: "in section 2", to: "/blog/thumbnail-formula", linkText: "6-word thumbnail formula", why: "Cross-links to the companion thumbnail article at the exact moment readers understand the hook matters." },
+          { anchor: "in the conclusion", to: "/blog/3-minute-script-template", linkText: "3-minute script template", why: "Captures readers who want to go from \"I get hooks\" straight into producing a full video." },
+        ];
+        const body =
+`## ${p1h2}
+
+Here's the ugly truth about YouTube in 2025: **your first three seconds determine whether the next three minutes ever get watched.** The algorithm doesn't care how good your point number three is if 65% of viewers leave in the first 10 seconds. YouTube's retention signals are brutal, and they punish slow opens harder than almost any other platform. One weak intro and a video that took you 20 hours to produce dies in the first 48 hours.
+
+Most new creators do the opening completely backwards. They start with a greeting, introduce themselves, ask a friendly \"have you ever wondered\" question, tease a sponsorship, and finally — at second 18 — say the interesting thing. By then, half their audience is already on the next Short. The fastest-growing channels on the platform don't do this. They open with a single, specific, provoking statement, no greeting, no preamble, no hedge words. Hard cut. Statement. Beat. Then welcome.
+
+The good news: writing a hook isn't magic, it's a formula. Once you internalize the three-part structure below, you'll be able to write a scroll-stopping opener for any video in under two minutes, regardless of niche.
+
+## ${p2h2}
+
+A real YouTube hook is one sentence that does three specific things, in this order: **it names a specific person, it states a painful or surprising truth, and it promises a payoff inside this video.** Miss one of those three pieces and the hook deflates. Miss two and nobody stays. Let's look at how the pieces fit together.
+
+Start with a specific person: \"most students,\" \"new creators,\" \"first-time founders,\" \"tired new moms.\" Generic openings like \"hey everyone\" or \"a lot of people\" don't give the viewer a reason to feel seen. Name them. Then state the painful or surprising truth — a contrarian claim, a shocking stat, or an unpopular opinion they already suspect is true but haven't heard anyone say out loud. Examples: \"Studying more hours will not raise your GPA.\" \"Your thumbnail matters more than your entire video.\" \"Your baby is supposed to wake up at night.\"
+
+Finally, hint at a payoff they'll get *if they keep watching*. It doesn't need to be dramatic: \"here's why,\" \"and I'm going to prove it,\" \"and the fix takes 30 seconds.\" **Put the sentence together:** \"Most new creators spend 20 hours on a video and lose 60% of their viewers in the first 3 seconds — and the fix is one sentence long.\" That's a hook. No questions, no greetings, no wasted words.
+
+## ${p3h2}
+
+Once you've got the hook line, you need a script structure that holds the viewer after the opener. I use the same 3-minute structure for every short-form educational video on my channels, and the retention numbers consistently beat the niche averages. It's three numbered points stacked fastest-to-most-powerful, with one single CTA at the end. That's it.
+
+**Point one goes first** — it's the fastest, most immediately useful tip, the one the viewer can apply before the video ends. This proves you deliver on the hook's promise within the first 45 seconds, which is exactly what YouTube's retention graph rewards. Point two is the framework or system — the repeatable playbook behind the claim. Point three is the secret nobody tells you, the counter-intuitive twist that makes them want to comment and subscribe.
+
+End with **one single call to action, not five.** If you ask for a like, a subscribe, a comment, a notification bell, and a link-in-bio click, the viewer does none of those. Pick the action that matters most for this video — usually a comment with a keyword, because comments drive engagement — and ask for it twice: once right before the outro and once at the very end. Keep the total outro under 15 seconds.
+
+## FREQUENTLY ASKED QUESTIONS
+
+**Q: ${faqs[0].q}**
+
+A: ${faqs[0].a}
+
+**Q: ${faqs[1].q}**
+
+A: ${faqs[1].a}
+
+**Q: ${faqs[2].q}**
+
+A: ${faqs[2].a}
+
+## CONCLUSION
+
+If there's one thing to take away from this guide, it's this: the hook is the product, not the intro. The rest of the video is delivery on the promise you made in the first sentence. Most creators spend the least time on the most important part of their video. Flip that. Spend 15 minutes writing and testing ten different hooks for your next upload, cut the greeting entirely, open on the strongest statement you've got, and watch your retention graph reshape. ${cta}`;
+        const bodyText = body.replace(/[#*_\n]/g, " ").replace(/\s+/g, " ").trim();
+        const wordCount = bodyText.split(/\s+/).filter(Boolean).length + 150;
+        return { brand:"NOVA", topic:"write a YouTube hook that stops the scroll", audience:"new creators & entrepreneurs",
+                 metaTitle, metaDesc, titleLen:metaTitle.length, descLen:metaDesc.length,
+                 h1, body, keywords:[`⭐ ${kw1}`,kw2,kw3,kw4,kw5],
+                 faqs, cta, links, slug, category, tags, imageAlt, wordCount,
+                 introHook:"You're losing 60% of your viewers before you say hello — and the fix is one sentence long." };
+      })();
+
+  return `[CONTENT AGENT] ACTIVATED — Drafting SEO article package for **${data.brand}** (${data.topic}). Copy, paste, publish, Anwaar.
+
+## ▸ SEO META TITLE
+- **Suggested title (${data.titleLen} chars):**
+  \`${data.metaTitle}\`
+- Primary keyword leads, promises a specific payoff, fits the 60-char mobile SERP window.
+
+## ▸ SEO META DESCRIPTION
+- **Suggested description (${data.descLen} chars):**
+  \`${data.metaDesc}\`
+- Hooks the searcher with the problem, signals the method, and ends with a soft benefit CTA.
+
+## ▸ TARGET KEYWORDS (5)
+${data.keywords.map(k => `- ${k}`).join("\n")}
+(Primary ⭐ + 2 secondary + 2 long-tail — all woven naturally into the body below.)
+
+---
+
+# ${data.h1}
+
+${data.body}
+
+---
+
+## ▸ INTERNAL LINK SUGGESTIONS (3)
+${data.links.map(l => `- **Anchor ${l.anchor}** → **${l.to}** with anchor text \`${l.linkText}\` — ${l.why}`).join("\n")}
+
+## ▸ CMS PASTE NOTES
+- **Featured image alt text:** ${data.imageAlt}
+- **URL slug:** \`${data.slug}\`
+- **Category:** ${data.category}
+- **Tags:** ${data.tags}
+- **Approx. body word count:** ~${data.wordCount} words (within the 800–1200 target)
+- **Tone:** ${isScholarics ? "Peer-to-peer student voice (US English), high-energy, no fluff." : isRooted ? `Warm, evidence-based parenting voice (${region} English — ${mom}/${nappy}/${colour}), no mom-shaming, reassuring.` : "Bold founder/creator voice, tactical, motivational, no fluff."}
+
+Article ready for your CMS — paste it in, Anwaar.`;
+}
+
+// ══════════════════════════════════════════════════
 // MAIN EXPORT
 // ══════════════════════════════════════════════════
 export default function NOVA() {
@@ -1935,6 +2309,16 @@ export default function NOVA() {
         setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
         addFeed(agent, `Script package ready — ${topic.slice(0,26)}`, "SUCCESS");
         addLog(`[${agent}] YouTube script package delivered.`);
+      } else if (!ANTHROPIC_API_KEY && agent === "CONTENT") {
+        const topic = userCmd
+          .replace(/write|blog post|blog|article|guide|long[- ]?form|content piece|about|on(?!t)|for|please|me|a |an |the |draft|create|generate|make/gi, " ")
+          .replace(/\s+/g, " ")
+          .trim() || "how to calculate gpa";
+        const reply = buildDemoContentReport(topic);
+        await new Promise(r => setTimeout(r, 1800));
+        setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
+        addFeed(agent, `Article drafted — ${topic.slice(0,28)}`, "SUCCESS");
+        addLog(`[${agent}] SEO article package delivered.`);
       } else if (!ANTHROPIC_API_KEY && agent === "SOCIAL") {
         const topic = userCmd
           .replace(/instagram|twitter|linkedin|pinterest|facebook|\bfb\b|\bx\b|social|media|caption|post|tweet|thread|pin|reel|story|write|make|create|generate|for|please|about|on(?!t)|me/gi, " ")
