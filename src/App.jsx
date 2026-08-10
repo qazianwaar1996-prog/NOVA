@@ -96,7 +96,7 @@ function TopBar() {
         </svg>
       </div>
       <div className="logo-word">
-        <div className="w">JARVIS</div>
+        <div className="w">NOVA</div>
         <div className="s">AI OPERATIONS COMMAND CENTER</div>
       </div>
       <div className="logo-pulse" />
@@ -524,7 +524,7 @@ function Stage() {
       <CoreViz />
 
       <div className="core-title" style={{ left: SC.x, top: SC.y - 26 }}>
-        <div className="n">JARVIS</div>
+        <div className="n">NOVA</div>
         <div className="r">MASTER AI ORCHESTRATOR</div>
         <div className="st">ONLINE</div>
       </div>
@@ -784,7 +784,7 @@ function ConsolePanel() {
             <span className="cx" style={l.tag === 'MISSION' ? { color: '#9fe8c4' } : undefined}>{l.text}</span>
           </div>
         ))}
-        <div className="cprompt">jarvis@command:~#<span className="cur" /></div>
+        <div className="cprompt">nova@command:~#<span className="cur" /></div>
       </div>
     </Chamfer>
   );
@@ -836,7 +836,7 @@ function CommandBar() {
 }
 
 /* ═══════════════ ROOT ═══════════════ */
-export default function NOVA() {
+function DesktopNOVA() {
   const vpRef = useRef(null);
   const [activeNav, setActiveNav] = useState('dashboard');
 
@@ -871,4 +871,544 @@ export default function NOVA() {
       </div>
     </div>
   );
+}
+
+/* ═══════════════ MOBILE NOVA COMMAND DEVICE ═══════════════ */
+const ALL_AGENTS = [...AGENTS_LEFT, ...AGENTS_RIGHT];
+const MOBILE_NAV = [
+  { id: 'home', target: 'mobile-home', icon: 'layout-grid', label: 'HOME' },
+  { id: 'team', target: 'mobile-team', icon: 'users', label: 'AI TEAM' },
+  { id: 'projects', target: 'mobile-projects', icon: 'clipboard-list', label: 'PROJECTS' },
+  { id: 'tasks', target: 'mobile-tasks', icon: 'list-todo', label: 'TASKS' },
+  { id: 'apis', target: 'mobile-apis', icon: 'hexagon', label: 'APIS' },
+  { id: 'more', target: 'mobile-more', icon: 'settings', label: 'MORE' },
+];
+
+function useIsMobile() {
+  const get = () => (typeof window !== 'undefined' ? window.innerWidth <= 700 : false);
+  const [isMobile, setIsMobile] = useState(get);
+  useEffect(() => {
+    const onResize = () => setIsMobile(get());
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return isMobile;
+}
+
+function MobilePanel({ id, className = '', children, c = 12, onClick, role, tabIndex, style }) {
+  const clip = cutPoly(c);
+  return (
+    <section id={id} className={`mobile-panel ${className}`} style={{ clipPath: clip, ...style }} onClick={onClick} role={role} tabIndex={tabIndex}>
+      <div className="mobile-panel-inner" style={{ clipPath: cutPoly(Math.max(1, c - 1)) }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function MobileSectionHeader({ title, eyebrow, action }) {
+  return (
+    <div className="mobile-section-head">
+      <div>
+        {eyebrow && <div className="mobile-eyebrow">{eyebrow}</div>}
+        <h2>{title}</h2>
+      </div>
+      {action && <span className="mobile-head-action">{action}<ChevronRight size={11} /></span>}
+    </div>
+  );
+}
+
+function TinyActivityGraph({ seed, w = 78, h = 24, className = '' }) {
+  const pts = useMemo(() => series(20, seed, 0.15, 0.9, 0.38), [seed]);
+  const step = w / (pts.length - 1);
+  const line = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - v * h).toFixed(1)}`).join(' ');
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className={`mobile-tiny-graph ${className}`} aria-hidden="true">
+      <defs>
+        <linearGradient id={`tinyFill${seed}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ff9a26" stopOpacity=".22" />
+          <stop offset="1" stopColor="#ff9a26" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${line} L${w},${h} L0,${h} Z`} fill={`url(#tinyFill${seed})`} />
+      <path d={line} fill="none" stroke="#ffb443" strokeOpacity=".82" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+      <circle cx={w - 2} cy={(h - pts[pts.length - 1] * h).toFixed(1)} r="2" fill="#ffe3ae" opacity=".9" />
+    </svg>
+  );
+}
+
+function MobileTopBar({ onProfile }) {
+  return (
+    <header className="mobile-topbar">
+      <div className="mobile-logo-cluster">
+        <div className="mobile-logo-mark" aria-hidden="true">
+          <svg viewBox="0 0 46 46" fill="none">
+            <circle cx="23" cy="23" r="21.5" stroke="#6b451c" strokeWidth="1" />
+            <circle cx="23" cy="23" r="21.5" stroke="#ffb443" strokeWidth="1.4" strokeDasharray="26 110" strokeLinecap="round" />
+            <circle cx="23" cy="23" r="16" stroke="#4a3015" strokeWidth="1" strokeDasharray="2 4" />
+            <circle cx="23" cy="23" r="3.2" stroke="#ffb443" strokeWidth="1.2" />
+            <circle cx="23" cy="23" r="1" fill="#ffdf9e" />
+            <path d="M23 1.5 v6 M23 38.5 v6 M1.5 23 h6 M38.5 23 h6" stroke="#8a5a20" strokeWidth="1.2" />
+          </svg>
+        </div>
+        <div className="mobile-logo-copy">
+          <div className="mobile-logo-word">NOVA</div>
+          <div className="mobile-logo-sub">AI OPERATIONS</div>
+        </div>
+      </div>
+      <div className="mobile-top-actions">
+        <div className="mobile-online-pill"><i />ONLINE</div>
+        <button className="mobile-icon-button" title="Notifications" type="button">
+          <Bell size={16} /><span>3</span>
+        </button>
+        <button className="mobile-profile-button" title="Commander" type="button" onClick={onProfile}>
+          <HoloAvatar size={30} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function MobileCommanderCard({ expanded, onToggle }) {
+  return (
+    <MobilePanel className={`mobile-commander ${expanded ? 'is-expanded' : ''}`} c={14} onClick={onToggle} role="button" tabIndex={0}>
+      <div className="mobile-commander-avatar"><HoloAvatar size={74} /></div>
+      <div className="mobile-commander-copy">
+        <div className="mobile-kicker">COMMANDER</div>
+        <div className="mobile-commander-name">ANWAAR</div>
+        <div className="mobile-commander-rank">MASTER CONTROL</div>
+        <div className="mobile-status-line"><i />ONLINE</div>
+      </div>
+      <div className="mobile-commander-side">
+        <span>AUTH 01</span>
+        <ChevronRight size={14} />
+      </div>
+      {expanded && (
+        <div className="mobile-card-reveal">
+          <span>COMMAND PRIVILEGES: ROOT</span>
+          <span>NOVA LINK: ENCRYPTED</span>
+          <span>VOICE PRINT: VERIFIED</span>
+        </div>
+      )}
+      <Brackets />
+    </MobilePanel>
+  );
+}
+
+function MobileCoreViz() {
+  const ticks = [];
+  for (let i = 0; i < 96; i++) {
+    const a = (i * 3.75) * Math.PI / 180;
+    const major = i % 8 === 0;
+    const r1 = 143;
+    const r2 = major ? 153 : 148;
+    ticks.push(
+      <line key={i}
+        x1={170 + r1 * Math.cos(a)} y1={170 + r1 * Math.sin(a)}
+        x2={170 + r2 * Math.cos(a)} y2={170 + r2 * Math.sin(a)}
+        stroke={major ? '#e08a2e' : '#8a5a20'} strokeOpacity={major ? .8 : .44}
+        strokeWidth={major ? 1.25 : .75} />
+    );
+  }
+  const particles = useMemo(() => {
+    const r = mulberry32(122);
+    return Array.from({ length: 58 }).map((_, i) => {
+      const a = r() * Math.PI * 2;
+      const dist = 48 + r() * 114;
+      return { i, x: 170 + Math.cos(a) * dist, y: 170 + Math.sin(a) * dist, s: r() < .18 ? 1.8 : 1.1, o: .18 + r() * .62 };
+    });
+  }, []);
+  const nodes = [18, 64, 112, 160, 210, 258, 310].map((deg) => {
+    const a = deg * Math.PI / 180;
+    return { x: 170 + 128 * Math.cos(a), y: 170 + 128 * Math.sin(a), deg };
+  });
+  return (
+    <svg className="mobile-core-svg" viewBox="0 0 340 340" aria-hidden="true">
+      <defs>
+        <radialGradient id="mAmb" cx=".5" cy=".5" r=".5">
+          <stop offset="0" stopColor="#ff8a12" stopOpacity=".24" />
+          <stop offset=".42" stopColor="#ff8a12" stopOpacity=".10" />
+          <stop offset="1" stopColor="#ff8a12" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="mCoreFill" cx=".5" cy=".45" r=".62">
+          <stop offset="0" stopColor="#211004" />
+          <stop offset=".6" stopColor="#0d0602" />
+          <stop offset="1" stopColor="#030100" />
+        </radialGradient>
+        <linearGradient id="mFlameGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffe0a6" />
+          <stop offset=".45" stopColor="#ff9a26" />
+          <stop offset="1" stopColor="#e05e00" />
+        </linearGradient>
+        <filter id="mSoft6"><feGaussianBlur stdDeviation="5" /></filter>
+        <filter id="mSoft2"><feGaussianBlur stdDeviation="1.5" /></filter>
+      </defs>
+      <circle cx="170" cy="170" r="166" fill="url(#mAmb)" />
+      <g className="m-spin-slow">
+        <circle cx="170" cy="170" r="158" fill="none" stroke="#b06a1e" strokeOpacity=".34" strokeWidth="1" strokeDasharray="1 9" />
+        <circle cx="170" cy="170" r="151" fill="none" stroke="#c07a28" strokeOpacity=".52" strokeWidth="1.1" strokeDasharray="38 18 5 18" />
+      </g>
+      {ticks}
+      <circle cx="170" cy="170" r="130" fill="none" stroke="#6e451a" strokeOpacity=".52" strokeWidth="1" />
+      <g className="m-spin-rev">
+        <circle cx="170" cy="170" r="112" fill="none" stroke="#cf862f" strokeOpacity=".58" strokeWidth="1.1" strokeDasharray="52 32 7 32" />
+        <circle cx="170" cy="170" r="98" fill="none" stroke="#a06824" strokeOpacity=".5" strokeWidth="1" strokeDasharray="4 8" />
+      </g>
+      <circle cx="170" cy="170" r="78" fill="none" stroke="#7a4d1c" strokeOpacity=".65" strokeWidth="1" strokeDasharray="1 3" />
+      {nodes.map((n, i) => (
+        <g key={i} className="mobile-radial-node">
+          <line x1="170" y1="170" x2={n.x} y2={n.y} stroke="#ff9a26" strokeOpacity=".18" strokeWidth="1" />
+          <circle cx={n.x} cy={n.y} r="4.4" fill="#ff9a26" opacity=".22" />
+          <circle cx={n.x} cy={n.y} r="1.8" fill="#ffdf9e" opacity=".92" />
+        </g>
+      ))}
+      {particles.map((p) => <circle key={p.i} cx={p.x} cy={p.y} r={p.s} fill="#ffd9a0" opacity={p.o} className="mobile-particle" />)}
+      <circle cx="170" cy="170" r="56" fill="none" stroke="#ff8310" strokeOpacity=".5" strokeWidth="12" filter="url(#mSoft6)" />
+      <circle cx="170" cy="170" r="56" fill="none" stroke="url(#mFlameGrad)" strokeWidth="6" />
+      <circle cx="170" cy="170" r="56" fill="none" stroke="#ffe6b8" strokeOpacity=".82" strokeWidth="2.2" filter="url(#mSoft2)" />
+      <circle cx="170" cy="170" r="51" fill="url(#mCoreFill)" stroke="#ffd9a0" strokeOpacity=".58" strokeWidth="1" />
+      <g className="m-spin-core">
+        <path d="M170 132 A38 38 0 0 1 208 170" fill="none" stroke="#ff9a26" strokeOpacity=".32" strokeWidth="1" />
+        <path d="M170 208 A38 38 0 0 1 132 170" fill="none" stroke="#ff9a26" strokeOpacity=".32" strokeWidth="1" />
+        <circle cx="208" cy="170" r="1.8" fill="#ffdf9e" opacity=".85" />
+        <circle cx="132" cy="170" r="1.8" fill="#ffdf9e" opacity=".85" />
+      </g>
+      <line x1="170" x2="170" y1="226" y2="314" stroke="#ffc24d" strokeOpacity=".42" strokeWidth="1.4" />
+      <ellipse cx="170" cy="314" rx="58" ry="10" fill="none" stroke="#ffb443" strokeOpacity=".32" />
+      <ellipse cx="170" cy="314" rx="30" ry="5" fill="none" stroke="#ffedc4" strokeOpacity=".55" />
+    </svg>
+  );
+}
+
+function MobileCorePanel() {
+  return (
+    <MobilePanel className="mobile-core-panel" c={16}>
+      <div className="mobile-core-label">NOVA CORE</div>
+      <div className="mobile-core-stage">
+        <MobileCoreViz />
+        <div className="mobile-core-title">
+          <div className="n">NOVA</div>
+          <div className="r">MASTER AI ORCHESTRATOR</div>
+          <div className="st"><i />ONLINE</div>
+        </div>
+        <span className="mobile-core-readout left">AGENT BUS<br />24 ONLINE</span>
+        <span className="mobile-core-readout right">CORE TEMP<br />OPTIMAL</span>
+      </div>
+      <Brackets />
+    </MobilePanel>
+  );
+}
+
+function MobileMetrics() {
+  return (
+    <MobilePanel className="mobile-metrics" c={12}>
+      <MobileSectionHeader title="MISSION METRICS" />
+      <div className="mobile-metric-grid">
+        {STATS.map((s) => (
+          <div key={s.label} className="mobile-metric-card">
+            <span className="metric-ic"><Ic name={s.icon} size={19} /></span>
+            <div className="metric-value">{s.value}</div>
+            <div className="metric-label">{s.label}</div>
+          </div>
+        ))}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobileAgentCard({ agent, seed, onOpen }) {
+  return (
+    <button type="button" className="mobile-agent-card" onClick={() => onOpen(agent)}>
+      <span className="mobile-agent-icon"><ChamferFrame size={38} c={5}><Ic name={agent.icon} size={17} /></ChamferFrame></span>
+      <div className="mobile-agent-main">
+        <div className="mobile-agent-name">{agent.name}</div>
+        <div className="mobile-agent-role">{agent.role}</div>
+        <div className="mobile-agent-online"><i />ONLINE</div>
+      </div>
+      <div className="mobile-agent-telemetry">
+        <div className="mobile-agent-pct">{agent.pct}%</div>
+        <TinyActivityGraph seed={seed} />
+      </div>
+    </button>
+  );
+}
+
+function MobileAgentModal({ agent, onClose }) {
+  if (!agent) return null;
+  return (
+    <div className="mobile-modal" onClick={onClose}>
+      <div className="mobile-modal-card" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="mobile-modal-close" onClick={onClose}><X size={16} /></button>
+        <div className="mobile-modal-head">
+          <ChamferFrame size={54} c={8}><Ic name={agent.icon} size={24} /></ChamferFrame>
+          <div>
+            <div className="mobile-kicker">AI AGENT DETAIL</div>
+            <div className="mobile-modal-title">{agent.name}</div>
+            <div className="mobile-modal-sub">{agent.role}</div>
+          </div>
+        </div>
+        <div className="mobile-detail-grid">
+          <div><span>STATUS</span><b className="green">ONLINE</b></div>
+          <div><span>PERFORMANCE</span><b>{agent.pct}%</b></div>
+          <div><span>LATENCY</span><b>12ms</b></div>
+          <div><span>QUEUE</span><b>ACTIVE</b></div>
+        </div>
+        <TinyActivityGraph seed={agent.pct * 13} w={300} h={54} className="mobile-modal-graph" />
+        <div className="mobile-modal-note">NOVA has this specialist linked to the encrypted AI communication bus and ready for direct command routing.</div>
+      </div>
+    </div>
+  );
+}
+
+function MobileTeamSection({ onOpenAgent }) {
+  return (
+    <MobilePanel id="mobile-team" className="mobile-team-section" c={12}>
+      <MobileSectionHeader title="AI TEAM" eyebrow="OVERVIEW" action="SWIPE" />
+      <div className="mobile-agent-carousel" aria-label="AI Team carousel">
+        {ALL_AGENTS.map((agent, i) => <MobileAgentCard key={agent.name} agent={agent} seed={140 + i * 17} onOpen={onOpenAgent} />)}
+      </div>
+      <div className="mobile-carousel-hint"><span /> ALL 12 SPECIALISTS ONLINE</div>
+    </MobilePanel>
+  );
+}
+
+function MobileProjects({ expanded, onToggle }) {
+  return (
+    <MobilePanel id="mobile-projects" className="mobile-projects" c={12}>
+      <MobileSectionHeader title="ACTIVE PROJECTS" action="DASHBOARDS" />
+      <div className="mobile-project-list">
+        {PROJECTS.map((p) => (
+          <button type="button" key={p.name} className={`mobile-project-row ${expanded === p.name ? 'expanded' : ''}`} onClick={() => onToggle(expanded === p.name ? null : p.name)}>
+            <span className="mobile-row-icon"><ChamferFrame size={32} c={5}><Ic name={p.icon} size={14} /></ChamferFrame></span>
+            <span className="mobile-project-copy">
+              <b>{p.name}</b>
+              <small>{p.type}</small>
+              <span className="mobile-progress"><i style={{ width: `${p.pct}%` }} /></span>
+            </span>
+            <span className="mobile-project-pct">{p.pct}%</span>
+            <ChevronRight className="mobile-expand-chevron" size={14} />
+            {expanded === p.name && (
+              <span className="mobile-project-detail">
+                <span>PROJECT DASHBOARD ONLINE</span>
+                <span>LEAD AGENT: {p.pct > 80 ? 'CODEX' : p.pct > 55 ? 'ARCHITECT' : 'DESIGNER'}</span>
+                <span>DEPLOYMENT CHANNEL: SECURE</span>
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobileTasks() {
+  return (
+    <MobilePanel id="mobile-tasks" className="mobile-tasks" c={12}>
+      <MobileSectionHeader title="TASK QUEUE" action="LIVE" />
+      <div className="mobile-task-list">
+        {TASKS.map((t) => (
+          <div key={t.title} className="mobile-task-row">
+            <span className="mobile-row-icon compact"><ChamferFrame size={26} c={5}><Ic name={t.icon} size={12} /></ChamferFrame></span>
+            <span className="mobile-task-copy">
+              <b>{t.title}</b>
+              <small>ASSIGNED AI: {t.agent}</small>
+              <span className="mobile-progress"><i style={{ width: `${t.pct}%` }} /></span>
+            </span>
+            <span className="mobile-task-pct">{t.pct}%</span>
+          </div>
+        ))}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobileApis({ expanded, onToggle }) {
+  return (
+    <MobilePanel id="mobile-apis" className="mobile-apis" c={12}>
+      <MobileSectionHeader title="API INTEGRATIONS" action="EXPAND" />
+      <div className="mobile-api-list">
+        {APIS.map((api) => (
+          <button type="button" key={api.name} className={`mobile-api-row ${expanded === api.name ? 'expanded' : ''}`} onClick={() => onToggle(expanded === api.name ? null : api.name)}>
+            <span className="mobile-api-logo"><BrandLogo kind={api.logo} /></span>
+            <span className="mobile-api-copy">
+              <b>{api.name}</b>
+              <small>{api.sub}</small>
+              <span className="mobile-progress"><i style={{ width: `${api.pct}%` }} /></span>
+            </span>
+            <span className="mobile-api-usage"><b>{api.pct}%</b><small>{api.usage}</small></span>
+            <ChevronRight className="mobile-expand-chevron" size={14} />
+            {expanded === api.name && (
+              <span className="mobile-api-detail">
+                <span>AUTH: ENCRYPTED TOKEN VAULT</span>
+                <span>RATE LIMIT: NOMINAL</span>
+                <span>NOVA ROUTING: ENABLED</span>
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobileFeed() {
+  return (
+    <MobilePanel className="mobile-feed" c={12}>
+      <MobileSectionHeader title="LIVE ACTIVITY FEED" action="SCROLL" />
+      <div className="mobile-feed-list">
+        {FEED.map((f, i) => (
+          <div key={`${f.t}-${i}`} className="mobile-feed-row">
+            <span className="mobile-feed-time">{f.t}</span>
+            <span className="mobile-feed-node"><Ic name={f.icon} size={12} /></span>
+            <span className="mobile-feed-copy"><b>{f.name}</b><small>{f.text}</small></span>
+            <span className="mobile-feed-ok">SUCCESS</span>
+          </div>
+        ))}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobilePerformance() {
+  const ranges = {
+    'CPU USAGE': [.1, .62],
+    'MEMORY USAGE': [.3, .75],
+    'NETWORK I/O': [.45, .9],
+    'DISK I/O': [.5, .92],
+  };
+  return (
+    <MobilePanel id="mobile-more" className="mobile-performance" c={12}>
+      <MobileSectionHeader title="SYSTEM PERFORMANCE" action="24H" />
+      <div className="mobile-performance-grid">
+        {PERF.map((m) => {
+          const label = m.label.replace(' USAGE', '').replace(' I/O', '');
+          const [lo, hi] = ranges[m.label] || [.2, .8];
+          return (
+            <div key={m.label} className="mobile-perf-card">
+              <div className="mobile-perf-head"><span>{label}</span><b>{m.pct}%</b></div>
+              <PerfChart seed={m.seed} lo={lo} hi={hi} />
+            </div>
+          );
+        })}
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobileWorldMap() {
+  const hubs = useMemo(() => Object.fromEntries(HUBS.map((h) => [h.id, { x: lon2x(h.lon), y: lat2y(h.lat) }])), []);
+  return (
+    <MobilePanel className="mobile-world" c={12}>
+      <MobileSectionHeader title="GLOBAL NETWORK" />
+      <svg viewBox="0 0 100 44" className="mobile-world-map" preserveAspectRatio="xMidYMid meet" aria-label="Holographic global network map">
+        <defs>
+          <linearGradient id="mobileArcGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#ff9a26" stopOpacity=".1" />
+            <stop offset=".5" stopColor="#ffc24d" stopOpacity=".95" />
+            <stop offset="1" stopColor="#ff9a26" stopOpacity=".1" />
+          </linearGradient>
+        </defs>
+        {MAP_DOTS.map((row, gy) => row.split('').map((ch, gx) => {
+          if (ch !== 'O') return null;
+          const h = (gx * 7 + gy * 13) % 19;
+          return <circle key={`${gx}-${gy}`} cx={gx + .5} cy={gy + 2.5} r={h === 0 ? .52 : .4} fill="#ff9a26" opacity={h === 0 ? .95 : h < 4 ? .58 : .32} />;
+        }))}
+        {ARCS.map(([a, b], i) => {
+          const p = hubs[a], q = hubs[b];
+          const mx = (p.x + q.x) / 2;
+          const my = (p.y + q.y) / 2 + 2;
+          const d = Math.hypot(q.x - p.x, q.y - p.y);
+          return <path key={i} d={`M${p.x} ${p.y + 2} Q${mx} ${my - d * 0.22} ${q.x} ${q.y + 2}`} fill="none" stroke="url(#mobileArcGrad)" strokeWidth=".5" strokeDasharray="2.6 1.8" className="mobile-arc" />;
+        })}
+        {HUBS.map((h) => {
+          const p = hubs[h.id];
+          return <g key={h.id}><circle cx={p.x} cy={p.y + 2} r="3.2" fill="#ff9a26" opacity=".26" /><circle cx={p.x} cy={p.y + 2} r="1.3" fill="#ffc24d" opacity=".88" /><circle cx={p.x} cy={p.y + 2} r=".55" fill="#fff2cf" /></g>;
+        })}
+      </svg>
+      <div className="mobile-network-stats">
+        <div><span>ACTIVE NODES</span><b>67</b></div>
+        <div><span>DATA TRANSFER</span><b>2.4<small> TB/s</small></b></div>
+        <div><span>UPTIME</span><b>99.98%</b></div>
+      </div>
+    </MobilePanel>
+  );
+}
+
+function MobileCommandConsole() {
+  const [cmd, setCmd] = useState('');
+  const [executed, setExecuted] = useState(false);
+  const exec = () => {
+    if (!cmd.trim()) return;
+    setExecuted(true);
+    setCmd('');
+    setTimeout(() => setExecuted(false), 1200);
+  };
+  return (
+    <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>
+      <div className="mobile-console-status">
+        <span><i />NOVA COMMAND LINK</span>
+        <small>{executed ? 'COMMAND ACCEPTED' : 'UPLINK SECURE'}</small>
+      </div>
+      <div className="mobile-console-input-row">
+        <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && exec()} placeholder="ENTER COMMAND..." aria-label="Enter command" />
+        <button type="button" className="mobile-mic" title="Voice command"><Mic size={17} /></button>
+        <button type="button" className="mobile-execute" onClick={exec}>EXECUTE</button>
+      </div>
+    </div>
+  );
+}
+
+function MobileBottomNav({ active, onNav }) {
+  return (
+    <nav className="mobile-bottom-nav" aria-label="NOVA mobile navigation">
+      {MOBILE_NAV.map((n) => (
+        <button key={n.id} type="button" className={active === n.id ? 'active' : ''} onClick={() => onNav(n)}>
+          <Ic name={n.icon} size={16} />
+          <span>{n.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function MobileNOVA() {
+  const [activeNav, setActiveNav] = useState('home');
+  const [activeAgent, setActiveAgent] = useState(null);
+  const [expandedProject, setExpandedProject] = useState(null);
+  const [expandedApi, setExpandedApi] = useState(null);
+  const [commanderOpen, setCommanderOpen] = useState(false);
+
+  const go = (nav) => {
+    setActiveNav(nav.id);
+    document.getElementById(nav.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  return (
+    <div className="mobile-viewport">
+      <div className="mobile-backdrop mobile-grid" />
+      <div className="mobile-backdrop mobile-vignette" />
+      <div className="mobile-backdrop mobile-scan" />
+      <MobileTopBar onProfile={() => setCommanderOpen((v) => !v)} />
+      <main className="mobile-content" id="mobile-home">
+        <MobileCommanderCard expanded={commanderOpen} onToggle={() => setCommanderOpen((v) => !v)} />
+        <MobileCorePanel />
+        <MobileMetrics />
+        <MobileTeamSection onOpenAgent={setActiveAgent} />
+        <MobileProjects expanded={expandedProject} onToggle={setExpandedProject} />
+        <MobileTasks />
+        <MobileApis expanded={expandedApi} onToggle={setExpandedApi} />
+        <MobileFeed />
+        <MobilePerformance />
+        <MobileWorldMap />
+      </main>
+      <MobileCommandConsole />
+      <MobileBottomNav active={activeNav} onNav={go} />
+      <MobileAgentModal agent={activeAgent} onClose={() => setActiveAgent(null)} />
+    </div>
+  );
+}
+
+export default function App() {
+  return useIsMobile() ? <MobileNOVA /> : <DesktopNOVA />;
 }
