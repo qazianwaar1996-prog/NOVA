@@ -13,8 +13,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'icon-192.png', 'icon-512.png'],
       manifest: {
-        name: 'JARVIS — AI Operations Command Center',
-        short_name: 'JARVIS',
+        name: 'NOVA — AI Operations Command Center',
+        short_name: 'NOVA',
         description: 'AI Operations Command Center — Master AI Orchestrator',
         theme_color: '#FF8C00',
         background_color: '#000000',

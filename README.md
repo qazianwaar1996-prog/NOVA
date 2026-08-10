@@ -1,4 +1,4 @@
-# NOVA — JARVIS AI Operations Command Center
+# NOVA — AI Operations Command Center
 
 A futuristic AI operations command center UI built with React + Vite + PWA.
 
@@ -64,7 +64,7 @@ Pages → Source to "GitHub Actions".
 
 ## 🎨 Features
 
-- JARVIS-inspired futuristic dark UI
+- NOVA-inspired futuristic dark UI
 - Orbitron / Rajdhani / Share Tech Mono typography
 - Animated dots / particle background
 - PWA (installable, offline-capable via Workbox)

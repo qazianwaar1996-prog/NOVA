@@ -1,4 +1,4 @@
-// ── NOVA (JARVIS Command Center) — data mirroring the design mockup ──
+// ── NOVA Command Center — data mirroring the design mockup ──
 
 export const STATS = [
   { icon: 'atom',           value: '24',    label: 'AI AGENTS' },
@@ -87,7 +87,7 @@ export const TASKS = [
 ];
 
 export const CONSOLE_LINES = [
-  { t: '12:45:31', tag: 'SYSTEM',   color: '#ffa12c', text: 'Jarvis core system initialized' },
+  { t: '12:45:31', tag: 'SYSTEM',   color: '#ffa12c', text: 'NOVA core system initialized' },
   { t: '12:45:32', tag: 'AI TEAM',  color: '#6aa8ff', text: 'All agents online and responsive' },
   { t: '12:45:33', tag: 'SECURITY', color: '#35e08a', text: 'All protocols secure' },
   { t: '12:45:34', tag: 'NETWORK',  color: '#9a7bff', text: 'Global nodes connected' },
