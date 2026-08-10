@@ -81,9 +81,118 @@ async function sendToNOVA(userCmd) {
   return reply;
 }
 
+/* ═══════════════ LIVE ACTIVITY BUS ═══════════════ */
+// Lightweight pub/sub so CommandBar can push activity to FeedPanel without
+// prop drilling through DesktopNOVA. Subscribers keep a local copy and render.
+const MAX_ACTIVITY = 12;
+let _activity = [...FEED];
+const _activitySubs = new Set();
+const _emitActivity = () => _activitySubs.forEach((fn) => fn(_activity));
+const pushActivity = (entry) => {
+  _activity = [entry, ..._activity].slice(0, MAX_ACTIVITY);
+  _emitActivity();
+};
+function useNovaActivity() {
+  const [items, setItems] = useState(_activity);
+  useEffect(() => {
+    const sub = (next) => setItems(next);
+    _activitySubs.add(sub);
+    // sync in case the bus was updated before this subscriber mounted
+    if (items !== _activity) setItems(_activity);
+    return () => { _activitySubs.delete(sub); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return items;
+}
+const agentIconFor = (a) => {
+  const k = (a || '').toUpperCase();
+  if (k.includes('SEO')) return 'search';
+  if (k.includes('CONTENT')) return 'file-text';
+  if (k.includes('SOCIAL')) return 'globe';
+  if (k.includes('YOUTUBE')) return 'aperture';
+  if (k.includes('EMAIL')) return 'send';
+  if (k.includes('ANALYTICS')) return 'chart-column';
+  if (k.includes('MONITOR')) return 'activity';
+  if (k.includes('IDEAS')) return 'atom';
+  if (k.includes('MARKETS')) return 'globe';
+  if (k.includes('MONETIZE')) return 'gauge';
+  return 'atom';
+};
+const summarizeCmd = (c, n = 60) => {
+  const s = (c || '').replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+};
+const nowStamp = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
 /* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
 function NOVAOutputModal({ output, agent, onClose }) {
+  const [copied, setCopied] = useState(false);
   if (!output) return null;
+
+  // Render text with light formatting: code blocks (```...```) become styled blocks;
+  // blank lines become paragraph breaks. Everything else preserves newlines.
+  const renderFormatted = (text) => {
+    if (!text) return null;
+    const segments = [];
+    const re = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let m;
+    let key = 0;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > lastIndex) {
+        segments.push({ type: 'text', value: text.slice(lastIndex, m.index) });
+      }
+      segments.push({ type: 'code', lang: m[1] || '', value: m[2] });
+      lastIndex = m.index + m[0].length;
+    }
+    if (lastIndex < text.length) segments.push({ type: 'text', value: text.slice(lastIndex) });
+
+    return segments.map((seg, i) => {
+      if (seg.type === 'code') {
+        return (
+          <pre key={i} style={{
+            background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,154,38,0.25)',
+            borderRadius: '4px', padding: '10px 12px', margin: '8px 0',
+            fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
+            color: '#ffd9a8', overflowX: 'auto', whiteSpace: 'pre',
+          }}>{seg.value}</pre>
+        );
+      }
+      // text segment — convert blank-line groups to paragraph breaks
+      const paras = seg.value.split(/\n{2,}/);
+      return paras.map((p, j) => (
+        <p key={`${i}-${j}`} style={{ margin: '0 0 8px 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {p.split('\n').map((line, k, arr) => (
+            <React.Fragment key={k}>
+              {line}
+              {k < arr.length - 1 && <br />}
+            </React.Fragment>
+          ))}
+        </p>
+      ));
+    });
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(output);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = output;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+      document.body.removeChild(ta);
+    }
+  };
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 999,
@@ -99,14 +208,19 @@ function NOVAOutputModal({ output, agent, onClose }) {
         maxHeight: '80vh', overflow: 'auto',
         boxShadow: '0 0 40px rgba(255,130,10,0.2)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px' }}>
           <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '10px', color: '#ff9a26', letterSpacing: '2px' }}>
             ⚡ {agent} — OUTPUT
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>CLOSE</button>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button onClick={copy} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: copied ? '#35e08a' : '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>
+              {copied ? 'COPIED' : 'COPY'}
+            </button>
+            <button onClick={onClose} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>CLOSE</button>
+          </div>
         </div>
-        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#e8c98a', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {output}
+        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#e8c98a', lineHeight: '1.7', wordBreak: 'break-word' }}>
+          {renderFormatted(output)}
         </div>
       </div>
     </div>
@@ -651,18 +765,19 @@ function PanelTitle({ title, action }) {
 }
 
 function FeedPanel() {
+  const items = useNovaActivity();
   return (
     <Chamfer x={1108} y={70} w={450} h={278} c={10}>
       <PanelTitle title="LIVE ACTIVITY FEED" action="VIEW ALL" />
-      {FEED.map((f, i) => (
-        <div key={i} className="feedrow" style={{ top: 34 + i * 37.5 }}>
+      {items.map((f, i) => (
+        <div key={`${f.t}-${f.name}-${i}`} className="feedrow" style={{ top: 34 + i * 37.5 }}>
           <span className="ft">{f.t}</span>
           <span className="fi"><ChamferFrame size={24} c={5}><Ic name={f.icon} size={11} /></ChamferFrame></span>
           <div>
             <div className="fn">{f.name}</div>
             <div className="fx">{f.text}</div>
           </div>
-          <span className="ok">SUCCESS</span>
+          <span className="ok" style={{ color: f.status === 'PROCESSING' ? '#ffb443' : undefined, textShadow: f.status === 'PROCESSING' ? '0 0 7px rgba(255,180,67,.4)' : undefined }}>{f.status || 'SUCCESS'}</span>
         </div>
       ))}
     </Chamfer>
@@ -896,10 +1011,35 @@ function CommandBar() {
     setAgent(det); setCmd(''); setFlash(true);
     setTimeout(() => setFlash(false), 480);
     setThinking(true);
+    // push a PROCESSING entry to the live activity feed
+    pushActivity({
+      t: nowStamp(),
+      name: det,
+      icon: agentIconFor(det),
+      text: `↳ ${summarizeCmd(userCmd)}`,
+      status: 'PROCESSING',
+    });
     try {
       const reply = await sendToNOVA(userCmd);
       setOutput(reply);
-    } catch { setOutput('Connection interrupted. Retry.'); }
+      // follow-up entry with the result summary
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: `✓ ${summarizeCmd(reply, 70)}`,
+        status: 'SUCCESS',
+      });
+    } catch {
+      setOutput('Connection interrupted. Retry.');
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: '✗ Connection interrupted. Retry.',
+        status: 'FAILED',
+      });
+    }
     finally { setThinking(false); }
   };
   return (
@@ -929,7 +1069,7 @@ function CommandBar() {
           <button className="sqbtn" title="Voice input"><Mic size={15} /></button>
         </Chamfer>
         <button className="execbtn" style={{ left: 512, top: 9, width: 186, height: 40, clipPath: cutPoly(8) }}
-          onClick={exec}>EXECUTE</button>
+          onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
         <Brackets />
       </div>
 
@@ -1369,16 +1509,17 @@ function MobileApis({ expanded, onToggle }) {
 }
 
 function MobileFeed() {
+  const items = useNovaActivity();
   return (
     <MobilePanel className="mobile-feed" c={12}>
       <MobileSectionHeader title="LIVE ACTIVITY FEED" action="SCROLL" />
       <div className="mobile-feed-list">
-        {FEED.map((f, i) => (
-          <div key={`${f.t}-${i}`} className="mobile-feed-row">
+        {items.map((f, i) => (
+          <div key={`${f.t}-${f.name}-${i}`} className="mobile-feed-row">
             <span className="mobile-feed-time">{f.t}</span>
             <span className="mobile-feed-node"><Ic name={f.icon} size={12} /></span>
             <span className="mobile-feed-copy"><b>{f.name}</b><small>{f.text}</small></span>
-            <span className="mobile-feed-ok">SUCCESS</span>
+            <span className="mobile-feed-ok" style={{ color: f.status === 'PROCESSING' ? '#ffb443' : f.status === 'FAILED' ? '#ff6a4a' : undefined }}>{f.status || 'SUCCESS'}</span>
           </div>
         ))}
       </div>
@@ -1463,10 +1604,33 @@ function MobileCommandConsole() {
     const det = detectAgent(userCmd);
     setAgent(det); setCmd('');
     setExecuted(true); setThinking(true);
+    pushActivity({
+      t: nowStamp(),
+      name: det,
+      icon: agentIconFor(det),
+      text: `↳ ${summarizeCmd(userCmd)}`,
+      status: 'PROCESSING',
+    });
     try {
       const reply = await sendToNOVA(userCmd);
       setOutput(reply);
-    } catch { setOutput('Connection interrupted. Retry.'); }
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: `✓ ${summarizeCmd(reply, 70)}`,
+        status: 'SUCCESS',
+      });
+    } catch {
+      setOutput('Connection interrupted. Retry.');
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: '✗ Connection interrupted. Retry.',
+        status: 'FAILED',
+      });
+    }
     finally { setThinking(false); setTimeout(() => setExecuted(false), 1200); }
   };
   return (
@@ -1478,7 +1642,7 @@ function MobileCommandConsole() {
       <div className="mobile-console-input-row">
         <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && exec()} placeholder="ENTER COMMAND..." aria-label="Enter command" />
         <button type="button" className="mobile-mic" title="Voice command"><Mic size={17} /></button>
-        <button type="button" className="mobile-execute" onClick={exec}>{thinking ? '...' : 'EXECUTE'}</button>
+        <button type="button" className="mobile-execute" onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
       </div>
       {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </div>
