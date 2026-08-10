@@ -58,6 +58,7 @@ function detectAgent(t) {
   if (/(idea|feature|suggest)/.test(t)) return 'IDEAS';
   if (/(us market|uk |australia|canada|localize)/.test(t)) return 'MARKETS';
   if (/(monetize|revenue|affiliate|earn|rpm)/.test(t)) return 'MONETIZE';
+  if (/(image|generate image|create image|picture|photo|thumbnail image|visual)/.test(t)) return 'IMAGE';
   return 'NOVA';
 }
 
@@ -212,23 +213,260 @@ THIS WEEK PRIORITIES:
 
 End with: "Anything else on this, Anwaar?"`;
 
-async function sendToNOVA(userCmd) {
-  novaHistory.push({ role: 'user', content: userCmd });
-  const useWeekly = isWeeklyReport(userCmd);
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+/* ═══════════════ MULTI-AI ROUTER · API KEYS ═══════════════ */
+// Every provider key is injected at build time from Vite environment
+// variables (see `.env.example` and the GitHub Actions deploy workflow).
+// A missing/invalid key simply makes that provider throw, which the
+// routing fallback chains in sendToNOVA() handle gracefully — so one
+// down provider never breaks the whole command center.
+const KEYS = {
+  gemini: import.meta.env.VITE_GEMINI_KEY,
+  groq: import.meta.env.VITE_GROQ_KEY,
+  deepseek: import.meta.env.VITE_DEEPSEEK_KEY,
+  mistral: import.meta.env.VITE_MISTRAL_KEY,
+  cohere: import.meta.env.VITE_COHERE_KEY,
+  openrouter: import.meta.env.VITE_OPENROUTER_KEY,
+  cerebras: import.meta.env.VITE_CEREBRAS_KEY,
+  huggingface: import.meta.env.VITE_HUGGINGFACE_KEY,
+  replicate: import.meta.env.VITE_REPLICATE_KEY,
+  stability: import.meta.env.VITE_STABILITY_KEY,
+  elevenlabs: import.meta.env.VITE_ELEVENLABS_KEY,
+  tavily: import.meta.env.VITE_TAVILY_KEY,
+};
+
+/* ── Provider call helpers ──────────────────────────────────────
+   Each helper throws on a non-OK HTTP response so the routing fallback
+   chains in sendToNOVA() can advance to the next provider. On success
+   it returns the model's text reply.                              */
+
+// Gemini 2.0 Flash — best for analysis & reasoning (SEO, Analytics, Monetize).
+async function callGemini(prompt, systemPrompt) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${KEYS.gemini}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        generationConfig: { maxOutputTokens: 1000 },
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+}
+
+// Groq · Llama 3.3 70B — fast, great for social posts & technical triage.
+async function callGroq(prompt, systemPrompt) {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${KEYS.groq}`,
+    },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1400,
-      system: useWeekly ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT,
-      messages: novaHistory.slice(-10),
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1000,
     }),
   });
+  if (!res.ok) throw new Error(`Groq ${res.status}`);
   const data = await res.json();
-  const reply = data.content?.map((c) => c.text || '').join('') || 'Signal lost. Retry.';
-  novaHistory.push({ role: 'assistant', content: reply });
-  return reply;
+  return data.choices?.[0]?.message?.content || 'No response';
+}
+
+// Mistral Small — best for writing & multilingual markets.
+async function callMistral(prompt, systemPrompt) {
+  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${KEYS.mistral}`,
+    },
+    body: JSON.stringify({
+      model: 'mistral-small-latest',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1000,
+    }),
+  });
+  if (!res.ok) throw new Error(`Mistral ${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'No response';
+}
+
+// DeepSeek — creative (YouTube scripts) & technical (Monitor diagnostics).
+async function callDeepSeek(prompt, systemPrompt) {
+  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${KEYS.deepseek}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1000,
+    }),
+  });
+  if (!res.ok) throw new Error(`DeepSeek ${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'No response';
+}
+
+// OpenRouter — model marketplace, ideal for brainstorming new ideas.
+async function callOpenRouter(prompt, systemPrompt) {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${KEYS.openrouter}`,
+      'HTTP-Referer': 'https://qazianwaar1996-prog.github.io/NOVA',
+      'X-Title': 'NOVA AI Operations',
+    },
+    body: JSON.stringify({
+      model: 'openrouter/auto',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1000,
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'No response';
+}
+
+// Cohere Command R+ — fallback for monetization analysis.
+async function callCohere(prompt, systemPrompt) {
+  const res = await fetch('https://api.cohere.ai/compatibility/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${KEYS.cohere}`,
+    },
+    body: JSON.stringify({
+      model: 'command-r-plus',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1000,
+    }),
+  });
+  if (!res.ok) throw new Error(`Cohere ${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'No response';
+}
+
+/* Pollinations AI image generation — FREE, no API key required.
+   Returns a direct image URL that <img> tags load cross-origin. */
+async function generateImage(prompt) {
+  const encoded = encodeURIComponent(prompt);
+  const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true`;
+  return url;
+}
+
+/* Human-readable label for the primary model each agent routes to.
+   Shown in the output modal header ("powered by …"). */
+function modelForAgent(agent) {
+  const a = (agent || '').toUpperCase();
+  if (a === 'IMAGE') return 'Pollinations AI';
+  if (a.includes('SEO')) return 'Gemini 2.0 Flash';
+  if (a.includes('CONTENT')) return 'Mistral Small';
+  if (a.includes('SOCIAL')) return 'Groq · Llama 3.3 70B';
+  if (a.includes('YOUTUBE')) return 'DeepSeek';
+  if (a.includes('EMAIL')) return 'Mistral Small';
+  if (a.includes('ANALYTICS')) return 'Gemini 2.0 Flash';
+  if (a.includes('MONITOR')) return 'DeepSeek';
+  if (a.includes('IDEAS')) return 'OpenRouter';
+  if (a.includes('MARKETS')) return 'Mistral Small';
+  if (a.includes('MONETIZE')) return 'Gemini 2.0 Flash';
+  return 'Gemini 2.0 Flash';
+}
+
+/* ═══════════════ MAIN ROUTER · sendToNOVA ═══════════════ */
+// Smart routing: each agent is dispatched to the AI best suited for the
+// task, with a fallback chain so a single down/key-less provider never
+// breaks the whole command center. IMAGE requests skip the LLMs entirely
+// and go straight to Pollinations image generation. The weekly briefing
+// still gets its specialized structured prompt.
+async function sendToNOVA(userCmd) {
+  const agent = detectAgent(userCmd);
+  const useWeekly = isWeeklyReport(userCmd);
+  const systemPrompt = useWeekly ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT;
+
+  try {
+    // ── IMAGE AGENT → Pollinations (free, no key) ────────────────
+    if (agent === 'IMAGE') {
+      const imageUrl = await generateImage(userCmd);
+      return `[IMAGE AGENT] ACTIVATED\n\nGenerating image via Pollinations AI…\n\n![Generated Image](${imageUrl})\n\nImage URL: ${imageUrl}`;
+    }
+
+    // ── Gemini-primary agents (analysis & reasoning) ─────────────
+    // SEO AGENT → Gemini · ANALYTICS → Gemini · MONETIZE → Gemini (→ Cohere)
+    if (agent === 'SEO AGENT' || agent === 'ANALYTICS') {
+      return await callGemini(userCmd, systemPrompt);
+    }
+    if (agent === 'MONETIZE') {
+      return await callGemini(userCmd, systemPrompt)
+        .catch(() => callCohere(userCmd, systemPrompt));
+    }
+
+    // ── Mistral-primary agents (writing & language) ──────────────
+    // CONTENT / MARKETS → Mistral (→ Gemini) · EMAIL → Mistral (→ Groq)
+    if (agent === 'CONTENT' || agent === 'MARKETS') {
+      return await callMistral(userCmd, systemPrompt)
+        .catch(() => callGemini(userCmd, systemPrompt));
+    }
+    if (agent === 'EMAIL') {
+      return await callMistral(userCmd, systemPrompt)
+        .catch(() => callGroq(userCmd, systemPrompt));
+    }
+
+    // ── Groq-primary agents (fast) ───────────────────────────────
+    // SOCIAL → Groq/Llama (→ Gemini)
+    if (agent === 'SOCIAL') {
+      return await callGroq(userCmd, systemPrompt)
+        .catch(() => callGemini(userCmd, systemPrompt));
+    }
+
+    // ── DeepSeek-primary agents (creative & technical) ───────────
+    // YOUTUBE → DeepSeek (→ Gemini) · MONITOR → DeepSeek (→ Groq)
+    if (agent === 'YOUTUBE') {
+      return await callDeepSeek(userCmd, systemPrompt)
+        .catch(() => callGemini(userCmd, systemPrompt));
+    }
+    if (agent === 'MONITOR') {
+      return await callDeepSeek(userCmd, systemPrompt)
+        .catch(() => callGroq(userCmd, systemPrompt));
+    }
+
+    // ── OpenRouter-primary agents ────────────────────────────────
+    // IDEAS → OpenRouter (→ Gemini)
+    if (agent === 'IDEAS') {
+      return await callOpenRouter(userCmd, systemPrompt)
+        .catch(() => callGemini(userCmd, systemPrompt));
+    }
+
+    // ── Default fallback chain: Gemini → Groq → Mistral ──────────
+    return await callGemini(userCmd, systemPrompt)
+      .catch(() => callGroq(userCmd, systemPrompt))
+      .catch(() => callMistral(userCmd, systemPrompt));
+  } catch (err) {
+    return `Connection interrupted. All APIs unreachable. Error: ${err.message}`;
+  }
 }
 
 /* ═══════════════ COMMAND CONSOLE LOG BUS ═══════════════ */
@@ -1513,16 +1751,37 @@ function NOVAOutputModal({ output, agent, onClose }) {
           }}>{seg.value}</pre>
         );
       }
-      // text segment — convert blank-line groups to paragraph breaks
+      // text segment — render markdown images inline (![alt](url)) and
+      // convert blank-line groups into paragraph breaks. This is what
+      // makes the IMAGE AGENT's generated picture actually show up.
+      const renderRichText = (text, baseKey) => {
+        const nodes = [];
+        const re = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+        let last = 0; let m; let n = 0;
+        const pushText = (chunk) => {
+          if (!chunk) return;
+          chunk.split('\n').forEach((line, k, arr) => {
+            nodes.push(<React.Fragment key={`${baseKey}-t${n++}`}>{line}</React.Fragment>);
+            if (k < arr.length - 1) nodes.push(<br key={`${baseKey}-b${n++}`} />);
+          });
+        };
+        while ((m = re.exec(text)) !== null) {
+          pushText(text.slice(last, m.index));
+          nodes.push(
+            <span key={`${baseKey}-img${n++}`} style={{ display: 'block', margin: '10px 0', textAlign: 'center' }}>
+              <img src={m[2]} alt={m[1]} loading="lazy"
+                style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid rgba(255,154,38,0.4)', boxShadow: '0 0 18px rgba(255,130,10,0.25)' }} />
+            </span>
+          );
+          last = m.index + m[0].length;
+        }
+        pushText(text.slice(last));
+        return nodes;
+      };
       const paras = seg.value.split(/\n{2,}/);
       return paras.map((p, j) => (
         <p key={`${i}-${j}`} style={{ margin: '0 0 8px 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {p.split('\n').map((line, k, arr) => (
-            <React.Fragment key={k}>
-              {line}
-              {k < arr.length - 1 && <br />}
-            </React.Fragment>
-          ))}
+          {renderRichText(p, `${i}-${j}`)}
         </p>
       ));
     });
@@ -1567,6 +1826,7 @@ function NOVAOutputModal({ output, agent, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px', flexWrap: 'wrap' }}>
           <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 2 }}>
             ⚡ {agent} — OUTPUT
+            <span style={{ color: '#9a7bff', marginLeft: 6, fontWeight: 400 }}>· powered by {modelForAgent(agent)}</span>
             {weeklyMode && <span style={{ color: '#ff9a26', marginLeft: 6 }}>· MONDAY BRIEFING</span>}
             {!weeklyMode && seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO STRUCTURED</span>}
           </div>
