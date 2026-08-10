@@ -257,8 +257,66 @@ Close with: "Package ready for upload — send it to the editor, Anwaar."
 📧 EMAIL AGENT — triggers on: email, reply, draft, mail
 → 3-bullet summary of intent, full draft reply, action items for the recipient.
 
-📊 ANALYTICS AGENT — triggers on: analytics, traffic, adsense, stats, report, ga4
-→ Wins, concerns, 3 concrete actions, AdSense RPM/placement tip.
+📊 ANALYTICS AGENT — triggers on: analytics, traffic, adsense, stats, ga4, weekly report, give me my report, analytics report, monday briefing, weekly briefing
+
+The ANALYTICS AGENT handles two types of requests:
+1. AD-HOC ANALYTICS QUESTIONS (traffic spikes, AdSense RPM, GA4 questions): respond with wins, concerns, 3 concrete actions, and an AdSense RPM/placement tip.
+2. WEEKLY REPORT (when the user asks for a "weekly report", "my report", "analytics report", "monday briefing", or similar): produce a structured Monday-morning briefing covering BOTH platforms (Scholarics AND Rooted).
+
+When the WEEKLY REPORT activates, start with:
+"[ANALYTICS AGENT] WEEKLY REPORT — Monday briefing compiled. Stand by, Anwaar.\n"
+
+Then output these sections in order, separated by horizontal rules \`---\`:
+
+## ▸ WEEK AT A GLANCE
+- Reporting week date range (e.g. "Aug 4 – Aug 10, 2025")
+- Overall win / headline metric (1 line — e.g. "Scholarics traffic +12% WoW, Rooted content sprint on track.")
+- Mood/verdict (1 line, plain-spoken)
+
+---
+
+## ▸ SCHOLARICS — WEEKLY REPORT
+**SEO HEALTH SCORE:** \`72/100\` (with an up/down arrow vs last week + a 1-line explanation of what moved)
+**Top 3 Performing Pages (this week):**
+- Page URL/path → estimated sessions, keyword it's ranking for
+- ... (3 bullets)
+**3 Pages That Need Attention:**
+- Page → problem (thin content / missing meta / slow / bounce spike) → 1-sentence fix
+- ... (3 bullets)
+**Keyword Opportunities (5):**
+- Five keyword suggestions, with estimated difficulty and intent in parentheses
+- Format: - \`keyword phrase\` (difficulty: low/med/high | intent: informational/transactional)
+**AdSense Optimization Tip:**
+- One concrete, monetization-focused tip (ad placement, RPM lift, above-the-fold unit, Auto ads toggle, etc.)
+**Content Recommendation for This Week:**
+- One specific article/topic to ship this week, why it matters, expected traffic impact.
+
+---
+
+## ▸ ROOTED — WEEKLY REPORT
+**Launch Readiness Checklist:**
+- 4–5 checklist items with status (✅ complete, 🟡 in progress, 🔴 not started) covering: MVP pages, onboarding flow, blog content, Pinterest account, analytics pixel, email capture, core stage content.
+**SEO Preparation Status:**
+- 1 paragraph on what's SEO-ready and what still needs to ship before launch.
+**Content Pipeline Suggestions (5 article ideas):**
+- 5 article titles/angles ready to hand to the CONTENT AGENT. Each with target keyword and angle.
+**Target Market Focus This Week:**
+- Rotate weekly between 🇺🇸 US / 🇬🇧 UK / 🇦🇺 AU / 🇨🇦 CA. Name the market, give 1 localization note (spelling, term, cultural angle), explain why this market is prioritized this week.
+**Pinterest Strategy Tip:**
+- One specific Pinterest action for the week (new board, pin design template, 5-pin batch day, keyword shift, Tailwind schedule, etc.) — Pinterest is the #1 acquisition channel for parenting.
+
+---
+
+## ▸ THIS WEEK, OVERALL
+- **TOP PRIORITY ACTION:** one specific, ship-today item (with where to ship it and what done looks like)
+- **BIGGEST OPPORTUNITY RIGHT NOW:** one under-rated opportunity worth pouncing on
+- **ONE THING TO AVOID:** one distraction / shiny object / trap to skip this week
+
+Close with: "Monday briefing complete — go ship it, Anwaar."
+
+Keep bullet points tight and scannable — this is read on a phone over morning coffee, not a boardroom. Use emojis sparingly (status marks, flags only). US English by default.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🚀 MONITOR AGENT — triggers on: uptime, deploy, github, error, broken, ci, build
 → Root-cause diagnosis, copy-pasteable Termux commands to fix, verification step.
@@ -869,8 +927,8 @@ function DesktopApp({ state, handlers }) {
             {messages.length===0?(
               <div style={{color:C.dim2,fontSize:11,lineHeight:2}}>
                 <span style={{color:C.dim}}>NOVA command output will appear here...</span><br/>
-                <span>Try: </span><span style={{color:C.orange}}>"SEO audit Scholarics homepage"</span><span> or </span><span style={{color:C.orange}}>"Write a blog post about GPA tips"</span><br/>
-                <span>Or: </span><span style={{color:C.orange}}>"Write Instagram posts for Rooted"</span>
+                <span>Try: </span><span style={{color:C.orange}}>"weekly report"</span><span> for a Monday briefing, or </span><span style={{color:C.orange}}>"SEO audit Scholarics homepage"</span><br/>
+                <span>Or: </span><span style={{color:C.orange}}>"Write a blog post about GPA tips"</span><span> · </span><span style={{color:C.orange}}>"Instagram posts for Rooted"</span>
               </div>
             ):messages.map((m,i)=>(
               <div key={i} className="fade" style={{marginBottom:12}}>
@@ -1076,7 +1134,7 @@ function DesktopCommandBar({ cmd, setCmd, execute, thinking, handleKey }) {
         {thinking?"PROCESSING...":"EXECUTE"}
       </button>
       <div style={{display:"flex",flexShrink:0}}>
-        {["/seo","/content","/social","/youtube","/monetize"].map((s,i,arr)=>(
+        {["/seo","/content","/social","/youtube","/analytics","/monetize"].map((s,i,arr)=>(
           <button key={i} onClick={()=>setCmd(s.slice(1)+" ")}
             style={{background:"#0a0600",border:`1px solid ${C.border2}`,borderLeft:i>0?"none":`1px solid ${C.border2}`,padding:"6px 10px",color:C.dim,fontFamily:"monospace",fontSize:8,cursor:"pointer",borderRadius:i===0?"3px 0 0 3px":i===arr.length-1?"0 3px 3px 0":"0"}}
             onMouseEnter={e=>e.currentTarget.style.color=C.orange}
@@ -1155,7 +1213,8 @@ function MobileApp({ state, handlers }) {
           {messages.length===0?(
             <div style={{color:C.dim2,fontSize:11,lineHeight:1.8}}>
               <span style={{color:C.dim}}>NOVA command output will appear here.</span><br/>
-              <span>Try: </span><span style={{color:C.orange}}>"SEO audit Scholarics"</span><br/>
+              <span>Try: </span><span style={{color:C.orange}}>"weekly report"</span><span> (Monday briefing)</span><br/>
+              <span>Or: </span><span style={{color:C.orange}}>"SEO audit Scholarics"</span><br/>
               <span>Or: </span><span style={{color:C.orange}}>"Write a blog post about GPA tips"</span><br/>
               <span>Or: </span><span style={{color:C.orange}}>"Instagram posts for Rooted"</span>
             </div>
@@ -2225,6 +2284,327 @@ Article ready for your CMS — paste it in, Anwaar.`;
 }
 
 // ══════════════════════════════════════════════════
+// Demo Analytics — Weekly Monday Briefing
+// Used when no ANTHROPIC_API_KEY is set. Produces a
+// scannable Monday-morning report covering BOTH
+// Scholarics and Rooted (SEO health, pages, keywords,
+// launch checklist, rotating market focus, Pinterest,
+// priority/opportunity/avoid).
+// ══════════════════════════════════════════════════
+function fmtDate(d) {
+  return d.toLocaleDateString("en-US", { month:"short", day:"numeric" });
+}
+function getWeekRange() {
+  const now = new Date();
+  const dow = now.getDay() === 0 ? 7 : now.getDay(); // Mon=1..Sun=7
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - dow + 1);
+  monday.setHours(0,0,0,0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return { monday, sunday, label: `${fmtDate(monday)} – ${fmtDate(sunday)}, ${monday.getFullYear()}` };
+}
+function rotateItem(weekNum, arr) { return arr[weekNum % arr.length]; }
+function weekNumber() {
+  // Deterministic ISO-ish week number based on Monday epoch.
+  const { monday } = getWeekRange();
+  return Math.floor(monday.getTime() / (7*24*60*60*1000));
+}
+
+function buildDemoWeeklyReport(/*rawCmd*/) {
+  const { label } = getWeekRange();
+  const wn = weekNumber();
+
+  // ── Overall metrics (slightly varied) ──
+  const seoScore = 70 + Math.floor(Math.random()*6); // 70–75
+  const lastScore = 68 + Math.floor(Math.random()*6);
+  const delta = seoScore - lastScore;
+  const arrow = delta > 0 ? "↗" : delta < 0 ? "↘" : "→";
+  const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
+  const wowTraffic = 8 + Math.floor(Math.random()*9); // +8..+16%
+
+  // ── Rotating market (US/UK/AU/CA, rotates weekly) ──
+  const markets = [
+    { flag:"🇺🇸", name:"United States",
+      note:"Use US spelling (color, behavior, organize, diaper, mom). Lean into back-to-college seasonality for Scholarics and fall-baby prep for Rooted.",
+      why:"Largest English-speaking ad market; AdSense RPMs traditionally peak here in Q3 — capture the back-to-school and holiday-planning traffic windows." },
+    { flag:"🇬🇧", name:"United Kingdom",
+      note:"Use UK spelling (colour, behaviour, organise, nappy, mum). Reference school terms (autumn term, GCSEs/A-levels for Scholarics; NHS guidance for Rooted where appropriate).",
+      why:"UK parenting search volume spikes September–October as families settle into the new term; CPCs are competitive but CTR is high on localised content." },
+    { flag:"🇦🇺", name:"Australia",
+      note:"Use AU/UK spelling (colour, behaviour, organise, nappy, mum). Reference TEE/HSC for students; note that summer = Dec–Feb so flip seasonal references.",
+      why:"AU ad RPMs rise in Q4 as brands compete for the summer gifting window; low editorial competition in parenting + study niches means fast ranking wins." },
+    { flag:"🇨🇦", name:"Canada",
+      note:"Use CA spelling (colour, behaviour, organise, diaper preferred but nappy understood; mom). Surface provincial-context notes (e.g., OSAP for students, province-specific parental leave).",
+      why:"Canadian audiences cross-shop US and UK content but reward localised phrasing; lower CPC than the US but far less content competition — easy SERP gains this week." },
+  ];
+  const market = rotateItem(wn, markets);
+
+  // ── Scholarics top 3 pages (rotate 3 variations to keep it fresh) ──
+  const topPageSets = [
+    [
+      { path:"/gpa-calculator",                  sessions:"4,280", kw:"gpa calculator" },
+      { path:"/blog/how-to-calculate-gpa",       sessions:"2,840", kw:"how to calculate gpa" },
+      { path:"/blog/study-tips-for-finals",      sessions:"1,910", kw:"study tips for finals" },
+    ],
+    [
+      { path:"/gpa-calculator",                  sessions:"4,610", kw:"gpa calculator" },
+      { path:"/blog/cgpa-to-percentage",         sessions:"2,320", kw:"cgpa to percentage" },
+      { path:"/blog/how-to-raise-your-gpa",      sessions:"1,780", kw:"how to raise your gpa" },
+    ],
+    [
+      { path:"/gpa-calculator",                  sessions:"3,950", kw:"gpa calculator" },
+      { path:"/blog/college-study-tips",         sessions:"2,140", kw:"college study tips" },
+      { path:"/blog/final-exam-prep",            sessions:"1,620", kw:"final exam prep" },
+    ],
+  ];
+  const topPages = rotateItem(wn, topPageSets);
+
+  // ── Scholarics pages needing attention ──
+  const attentionSets = [
+    [
+      { path:"/blog/best-study-apps",       prob:"thin content (~180 words)",          fix:"Expand to an 800+ word comparison table with 6–8 apps, pricing screenshots, and a 'best for student' verdict per category." },
+      { path:"/cgpa-to-percentage",         prob:"meta description 192 chars",        fix:"Trim to 150–155 chars front-loading 'CGPA to percentage converter' — mobile SERPs are truncating the CTA." },
+      { path:"/about",                      prob:"missing FAQ schema",                fix:"Add a 3-question FAQPage schema block (who built it, is it free, how it calculates) — quick rich-snippet eligibility." },
+    ],
+    [
+      { path:"/blog/midterm-study-plan",    prob:"bounce rate 78% (↑12 pts WoW)",     fix:"Add a sticky table-of-contents + jump links above the fold; readers are landing and leaving without scrolling." },
+      { path:"/scholarships",               prob:"zero internal links in",            fix:"Add 3 contextual links from the GPA calculator, finals guide and homepage — this page is orphaned." },
+      { path:"/blog/best-laptops-students", prob:"last updated Aug 2024",             fix:"Refresh pricing, 2025 model picks, and add a 'back-to-school 2025' update badge to regain freshness signals." },
+    ],
+    [
+      { path:"/blog/semester-planner",      prob:"H1 missing primary keyword",        fix:"Change H1 to 'Free Semester Planner Template (That Actually Gets Used)' — current H1 is vague." },
+      { path:"/grade-calculator",           prob:"LCP 3.8s on mobile",                fix:"Lazy-load the hero screenshot and inline critical CSS; should drop under 2.5s which is the Core Web Vitals pass line." },
+      { path:"/blog/freshman-tips",         prob:"no featured image",                 fix:"Add a 1200x630 social card and og:image tag; Pinterest/IG shares are showing broken previews." },
+    ],
+  ];
+  const attentionPages = rotateItem(wn, attentionSets);
+
+  // ── Keyword opportunities ──
+  const kwSets = [
+    [
+      { kw:"what is a good gpa in college", diff:"low",  intent:"informational" },
+      { kw:"gpa calculator for high school", diff:"med",  intent:"transactional" },
+      { kw:"how to get a 4.0 gpa",           diff:"med",  intent:"informational" },
+      { kw:"semester grade calculator",      diff:"low",  intent:"transactional" },
+      { kw:"best study schedule for finals", diff:"med",  intent:"commercial" },
+    ],
+    [
+      { kw:"cumulative gpa calculator",      diff:"low",  intent:"transactional" },
+      { kw:"how to convert cgpa to percentage",diff:"low",intent:"informational" },
+      { kw:"college freshman survival tips", diff:"med",  intent:"informational" },
+      { kw:"is a 3.5 gpa good",              diff:"low",  intent:"informational" },
+      { kw:"study schedule maker free",      diff:"med",  intent:"transactional" },
+    ],
+    [
+      { kw:"weighted vs unweighted gpa",     diff:"low",  intent:"informational" },
+      { kw:"gpa to letter grade converter",  diff:"low",  intent:"transactional" },
+      { kw:"how to study for math finals",   diff:"med",  intent:"informational" },
+      { kw:"college packing list freshman",  diff:"high", intent:"commercial" },
+      { kw:"best note taking app for students",diff:"med",intent:"commercial" },
+    ],
+  ];
+  const keywords = rotateItem(wn, kwSets);
+
+  // ── AdSense tip rotation ──
+  const adsenseTips = [
+    "Enable **anchor ads on mobile** for `/gpa-calculator` only — tool pages with high dwell time see ~+22% RPM with anchor units above the fold. Keep content pages clean (no anchor) to preserve reading experience.",
+    "Move the in-article ad from position 2 to position 3 (after the first 3 paragraphs) on the GPA tutorial — testing shows users scroll past early ads blind; position 3 lifts viewability +18%.",
+    "Turn on **AdSense Auto ads 'optimized ad load'** for mobile and disable vignette ads entirely — vignette interstitials are bouncing 14% of calculator users who expect instant tool access.",
+    "Block the 3 low-RPM ad categories ('get rich quick', 'online gambling', 'weight loss pills') in your AdSense Allow/Block center — they pay $0.30–0.80 RPM and tank user trust.",
+  ];
+  const adsenseTip = rotateItem(wn, adsenseTips);
+
+  // ── Content recommendation ──
+  const contentRecs = [
+    "Ship **\"How I Went From a 2.9 to a 3.8 in One Semester\"** (2.9/3.8, personal story, ~1,200 words). Target: `how to raise your gpa fast`. High-intent, high-share, natural internal links to the calculator. Est. 2–3k sessions/mo within 6 weeks.",
+    "Publish **\"The 8-Minute Post-Lecture Study Rule\"** (retrieval-practice micro-system, ~900 words). Target: `study tips for college`. Low difficulty, hooks mid-semester crammers, perfect for Pinterest pins.",
+    "Write **\"GPA Calculator: Exact Grades You Need on Every Final\"** (a landing-page-style post pointing hard at the tool). Target: `what do i need on my final`. Transactional intent — directly converts to repeat tool users.",
+  ];
+  const contentRec = rotateItem(wn, contentRecs);
+
+  // ── Rooted launch checklist (mix rotates but keeps consistent shape) ──
+  const checklistSets = [
+    [
+      { item:"Core brand identity & logo",                                status:"✅" },
+      { item:"Pinterest business account + 5 seed boards",                status:"✅" },
+      { item:"Newborn stage guide (0–3 months)",                         status:"🟡", note:"draft at 60%, missing FAQ schema" },
+      { item:"E.A.S.Y. routine pillar article",                           status:"🟡", note:"outline done, body not started" },
+      { item:"Email capture / lead magnet (0–3mo sleep guide PDF)",       status:"🔴", note:"not started — blocks list building" },
+      { item:"Custom domain DNS + SSL",                                   status:"🔴", note:"DNS not yet propagated" },
+    ],
+    [
+      { item:"Brand identity, logo, typography system",                   status:"✅" },
+      { item:"Pinterest business account live",                           status:"✅" },
+      { item:"Newborn sleep schedule pillar",                             status:"🟡", note:"first draft in progress" },
+      { item:"Stage landing pages (pregnancy, newborn, toddler)",         status:"🟡", note:"newborn live; others wired" },
+      { item:"Onboarding / email welcome sequence (3 emails)",            status:"🔴", note:"copy not drafted" },
+      { item:"GA4 + Pinterest tag installed across site",                 status:"🟡", note:"GA4 live, Pinterest tag pending" },
+    ],
+  ];
+  const checklist = rotateItem(wn, checklistSets);
+
+  // ── SEO prep paragraph (rotates slightly) ──
+  const seoPrepParagraphs = [
+    "Sitemap and robots.txt are live and submitted to Google Search Console; core brand pages (home, about, stages) are indexed. OG tags are shipping on the homepage only — article-level OG images + 1200x630 cards still need to be generated programmatically. FAQ schema is missing from the two drafted pillars, which is leaving an easy rich-snippet win on the table for `newborn sleep schedule` and `EASY method`. Priority before launch: ship OG tags on blog templates, add FAQ schema to both drafted pillars, and wire a self-referencing canonical on every page to avoid duplicate-content flags when we push staging to production.",
+    "Core Web Vitals are in the green on mobile (LCP 1.9s, CLS 0.04) which is a strong launch baseline. Schema (Organization + WebSite) is live on the homepage; Article + FAQ schema still needs to be added to blog post templates. Internal linking is thin — the sleep pillar needs at least 3 contextual links from the newborn stage page. Pinterest tag fires on pageview but **add-to-cart** / **lead** events aren't configured yet; hold off on paid Pinterest until the lead magnet is live so we can actually measure cost-per-subscriber.",
+  ];
+  const seoPrep = rotateItem(wn, seoPrepParagraphs);
+
+  // ── Content pipeline (5 article ideas) ──
+  const pipelineSets = [
+    [
+      { title:"Newborn Sleep Schedule That Actually Works (No Cry-It-Out)", kw:"newborn sleep schedule",                       angle:"E.A.S.Y. routine + drowsy-but-awake tutorial, week-by-week" },
+      { title:"The 30-Second Window That Teaches Your Baby to Self-Soothe", kw:"drowsy but awake",                             angle:"counter-intuitive micro-skill every parent misses" },
+      { title:"What Nobody Tells You About the Fourth Trimester",           kw:"fourth trimester",                              angle:"raw personal essay + 7 real-things list, shareable" },
+      { title:"Tummy Time: How Long, When to Start, and When to Worry",     kw:"tummy time for newborns",                       angle:"pediatrician-referenced, milestone-by-week" },
+      { title:"E.A.S.Y. Routine for Newborns (Printable Sample Day)",       kw:"EASY method newborn",                           angle:"printable routine card = huge Pinterest save magnet" },
+    ],
+    [
+      { title:"When Do Babies Sleep Through the Night? (Real Data)",        kw:"when do babies sleep through the night",        angle:"myth-bust with cited pediatric sleep data" },
+      { title:"Newborn Feeding Chart: How Much, How Often (By Weight)",     kw:"newborn feeding chart",                         angle:"quick-reference chart, Pinnable infographic" },
+      { title:"Gentle Sleep Training Without Cry-It-Out (6–12 Weeks)",      kw:"gentle sleep training",                         angle:"method comparison (Ferber vs Chair vs No-Tears)" },
+      { title:"Postpartum Recovery Checklist for the First 6 Weeks",        kw:"postpartum recovery",                           angle:"checklist for mom + partner, gift-guide adjacent" },
+      { title:"Signs of a Growth Spurt (and How to Survive It)",            kw:"baby growth spurt signs",                       angle:"behavioural cues, feeding changes, sleep regression tie-in" },
+    ],
+    [
+      { title:"How to Get a Newborn to Nap Longer Than 30 Minutes",         kw:"newborn short naps",                            angle:"fix short catnaps — high-urgency pain point" },
+      { title:"Swaddle Transition: When to Stop and What Comes Next",       kw:"when to stop swaddling",                        angle:"developmental safety guide, affiliate to sleep sacks" },
+      { title:"Witch Hour: Why Your Baby Fusses Every Evening (Fixes)",     kw:"witching hour baby",                            angle:"high-search, emotional first-parent problem" },
+      { title:"Newborn Essentials Checklist: What You Actually Need",       kw:"newborn essentials checklist",                  angle:"anti-registry list = saves new parents money" },
+      { title:"Best Bedtime Routine for a 3 Month Old (Step by Step)",      kw:"3 month old bedtime routine",                   angle:"exact 20-minute step-by-step, printout" },
+    ],
+  ];
+  const pipeline = rotateItem(wn, pipelineSets);
+
+  // ── Pinterest tip ──
+  const pinTips = [
+    "**Batch 5 fresh pins this week** for the newborn sleep pillar — 5 vertical designs (2:3 ratio) with **different** text overlays and hook angles, all pointing to the same URL. Pinterest rewards fresh creative over repins; 5 fresh pins per week is the publishing sweet spot right now.",
+    "Rename your top board from `Baby Tips` to **`Newborn Sleep Tips & Gentle Parenting`** and put `newborn sleep schedule` as the board description's first phrase. Board-name keyword matching is a top 3 ranking signal on Pinterest in 2025.",
+    "Ship one **Idea Pin per week** (3–5 pages, text-on-clipboard-style) breaking down one micro-tip from the E.A.S.Y. routine — Idea Pins are getting 3–5x the reach of static pins in the parenting niche right now. Drive saves, not clicks.",
+    "Add **3 keyword-rich sections** to your Pinterest profile display name: e.g., `Rooted · Newborn Sleep · Gentle Parenting · Baby Routines`. The display name is fully indexed — this is a 10-minute change that lifts every pin you publish.",
+  ];
+  const pinTip = rotateItem(wn, pinTips);
+
+  // ── Overall priority / opportunity / avoid ──
+  const prioritySets = [
+    { priority:"Ship the **0–3 month sleep-guide PDF lead magnet** + one opt-in form above the fold on the newborn stage page (use a simple MailerLite/ConvertKit embed). Done = landing page live + PDF delivered on signup + welcome email #1 queued. Target: first 50 subscribers by end of week.",
+      opportunity:"**Finals-week traffic window is 3 weeks out** — publish the 'What Do I Need on My Final?' calculator post + the 2.9→3.8 personal story **this week** so Google has time to index before students start searching at volume. This window alone can do 20–30k sessions.",
+      avoid:"Chasing viral Reels/TikToks before the evergreen SEO foundation ships. One pillar article on Scholarics and one on Rooted will out-earn 100 social posts over the next 12 months. Film 1 Reel if you must; ship the articles first." },
+    { priority:"Finish the **E.A.S.Y. routine pillar article** (add FAQ schema + printable routine card + 1200x630 OG image) and publish by Thursday. Then pin it to your primary board with 3 fresh static pin designs.",
+      opportunity:"**Pinterest fresh pins are driving 3x more saves than static repins right now** in the parenting niche — batching 10 fresh pin creatives on Canva this Sunday for the 2 published pillars will cost ~90 minutes and likely add 20–40% more weekly reach on autopilot.",
+      avoid:"Redesigning the logo or tweaking the color palette again. Ship content, collect data, iterate design later. Premature visual polish is the #1 launch-delay trap this week." },
+    { priority:"Add **FAQ schema + OG images** to the two existing Rooted pillars and submit both URLs in GSC 'Request Indexing'. Takes ~45 minutes, unlocks rich snippets that typically lift CTR 15–25% on mobile parenting SERPs.",
+      opportunity:"The `newborn sleep schedule` SERP has **2 out-of-date 2022 articles ranking top 5** with no fresh updates. A well-structured 2025-updated pillar with schema + 5 fresh pins can realistically break into the top 3 inside 4 weeks.",
+      avoid:"Shipping 5 half-finished articles instead of finishing 1 properly. One complete, internally linked, schema-tagged pillar with pins outperforms five 300-word drafts every time." },
+  ];
+  const overall = rotateItem(wn, prioritySets);
+
+  // ── Assemble ──
+  const winLine = `Scholarics traffic **+${wowTraffic}% WoW**; Rooted content sprint is on track (${checklist.filter(c=>c.status==="✅").length}/${checklist.length} checklist items green).`;
+  const moods = [
+    "Steady week ahead — fundamentals are improving, but there's real work to ship before the finals / fall-baby windows open.",
+    "Decent momentum. SEO score moved, pins are gaining traction, but two red items on Rooted need clearing before launch.",
+    "Green lights and amber lights mixed. The 0–3 month window is the bottleneck; unblock it and everything else compounds.",
+  ];
+  const mood = rotateItem(wn, moods);
+
+  return `[ANALYTICS AGENT] WEEKLY REPORT — Monday briefing compiled. Stand by, Anwaar.
+
+## ▸ WEEK AT A GLANCE
+- **Reporting week:** ${label}
+- **Headline:** ${winLine}
+- **Verdict:** ${mood}
+
+---
+
+## ▸ SCHOLARICS — WEEKLY REPORT
+
+**SEO HEALTH SCORE:** \`${seoScore}/100\` ${arrow} ${deltaStr}
+${delta >= 0
+  ? `Score lifted ${delta} points — improvements came from the new meta descriptions on the GPA calculator and a small Core Web Vitals bump after lazy-loading the hero image.`
+  : `Score slipped ${Math.abs(delta)} points — thin-content flags on 2 blog pages and a slow LCP on /grade-calculator dragged the average. Fix list is below.`}
+
+**Top 3 Performing Pages (this week):**
+${topPages.map(p => `- **${p.path}** → ~${p.sessions} sessions — ranking for \`${p.kw}\``).join("\n")}
+
+**3 Pages That Need Attention:**
+${attentionPages.map(p => `- **${p.path}** — ${p.prob} → ${p.fix}`).join("\n")}
+
+**Keyword Opportunities (5):**
+${keywords.map(k => `- \`${k.kw}\` (difficulty: ${k.diff} | intent: ${k.intent})`).join("\n")}
+
+**AdSense Optimization Tip:**
+${adsenseTip}
+
+**Content Recommendation for This Week:**
+${contentRec}
+
+---
+
+## ▸ ROOTED — WEEKLY REPORT
+
+**Launch Readiness Checklist:**
+${checklist.map(c => `- ${c.status} **${c.item}**${c.note ? ` — ${c.note}` : ""}`).join("\n")}
+
+**SEO Preparation Status:**
+${seoPrep}
+
+**Content Pipeline Suggestions (5 article ideas):**
+${pipeline.map((a,i) => `- ${i+1}. **${a.title}** — target: \`${a.kw}\` · angle: ${a.angle}`).join("\n")}
+
+**Target Market Focus This Week:** ${market.flag} **${market.name}**
+- *Localization note:* ${market.note}
+- *Why this week:* ${market.why}
+
+**Pinterest Strategy Tip:**
+${pinTip}
+
+---
+
+## ▸ THIS WEEK, OVERALL
+- **TOP PRIORITY ACTION:** ${overall.priority}
+- **BIGGEST OPPORTUNITY RIGHT NOW:** ${overall.opportunity}
+- **ONE THING TO AVOID:** ${overall.avoid}
+
+Monday briefing complete — go ship it, Anwaar.`;
+}
+
+// Quick ad-hoc analytics response (non-weekly-report queries like "how's traffic", "adsense stats", etc.)
+function buildDemoAnalyticsQuick(rawCmd) {
+  const q = (rawCmd||"").toLowerCase();
+  const isSchol = /scholarics|gpa|study|student|grade|exam|college/i.test(q);
+  const isRooted = /rooted|parent|baby|newborn|sleep|mom|mum/i.test(q);
+  const scope = isSchol ? "Scholarics" : isRooted ? "Rooted" : "Scholarics + Rooted";
+  const wow = 8 + Math.floor(Math.random()*9);
+  const rpm = (2.4 + Math.random()*1.6).toFixed(2);
+  const bounce = (42 + Math.floor(Math.random()*8));
+
+  let focus = "**Wins:** Organic traffic is climbing steadily; the GPA calculator continues to be the stickiest page (avg 3:14 dwell time).";
+  if (/adsense|rpm|revenue|earn|monetize/i.test(q)) {
+    focus = `**AdSense snapshot:** Estimated RPM ~$${rpm} (US mobile is paying $${(parseFloat(rpm)+1.2).toFixed(2)}), Page CTR ~1.8%, coverage 94%.`;
+  } else if (/bounce|retention|dwell/i.test(q)) {
+    focus = `**Engagement:** Bounce rate ${bounce}% site-wide. Tool pages are at 31% (healthy); blog posts average 58% — ToCs + jump links are the fastest lever.`;
+  } else if (/traffic|sessions|visitors|stats|analytics|ga4/i.test(q)) {
+    focus = `**Traffic:** ~${isRooted ? "1.2k (pre-launch, mostly Pinterest seed)" : "12.4k sessions"} this week, +${wow}% WoW. US leads at 48% of traffic, followed by ${isRooted ? "UK 18%, CA 12%, AU 9%" : "IN 22%, UK 9%, CA 6%"}.`;
+  }
+
+  return `[ANALYTICS AGENT] Snapshot ready for **${scope}**. Stand by, Anwaar.
+
+## ▸ QUICK STATS
+- ${focus}
+- **Top referrer:** ${isRooted ? "Pinterest (organic)" : "Google organic"}
+- **Device split:** Mobile 71% / Desktop 27% / Tablet 2%
+
+## ▸ 3 ACTIONS TO TAKE TODAY
+- **${isRooted ? "Finish the E.A.S.Y. pillar draft" : "Tighten meta descriptions on /blog/best-study-apps and /cgpa-to-percentage"}** — ~15 minutes, direct CTR lift.
+- **${isRooted ? "Ship 3 fresh Pinterest pins for the newborn sleep draft" : "Enable mobile anchor ads on the GPA calculator"}** — RPM/reach lift within 48 hours.
+- **${isRooted ? "QA GA4 + Pinterest tag firing on stage pages" : "Add FAQ schema to /about"}** — unlocks measurement / rich snippets.
+
+Want the full Monday briefing? Type **"weekly report"** and I'll generate both platforms in detail, Anwaar.`;
+}
+
+// ══════════════════════════════════════════════════
 // MAIN EXPORT
 // ══════════════════════════════════════════════════
 export default function NOVA() {
@@ -2329,6 +2709,25 @@ export default function NOVA() {
         setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
         addFeed(agent, `Socials ready — ${topic.slice(0,28)}`, "SUCCESS");
         addLog(`[${agent}] Cross-platform social package delivered.`);
+      } else if (!ANTHROPIC_API_KEY && agent === "ANALYTICS") {
+        const isWeekly = /weekly|monday|briefing|my report|weekly report|analytics report|give me my report/i.test(userCmd);
+        if (isWeekly) {
+          addFeed(agent, "Compiling Monday briefing…", "RUNNING");
+          addLog(`[${agent}] Building weekly report (Scholarics + Rooted)...`);
+          await new Promise(r => setTimeout(r, 1800));
+          const reply = buildDemoWeeklyReport(userCmd);
+          setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
+          addFeed(agent, "Weekly report delivered", "SUCCESS");
+          addLog(`[${agent}] Monday briefing delivered to Commander.`);
+        } else {
+          addFeed(agent, "Pulling analytics snapshot…", "RUNNING");
+          addLog(`[${agent}] Fetching ad-hoc analytics...`);
+          await new Promise(r => setTimeout(r, 1200));
+          const reply = buildDemoAnalyticsQuick(userCmd);
+          setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
+          addFeed(agent, "Analytics snapshot ready", "SUCCESS");
+          addLog(`[${agent}] Analytics snapshot delivered.`);
+        }
       } else if (!ANTHROPIC_API_KEY) {
         await new Promise(r=>setTimeout(r,700));
         setMessages(p=>[...p,{role:"assistant",content:"[NOVA] Anthropic API key not configured. Open src/App.jsx and set ANTHROPIC_API_KEY to enable live AI responses. The SEO AGENT demo mode is available — try: \"seo audit scholarics.com\"",agent:"SYSTEM"}]);
