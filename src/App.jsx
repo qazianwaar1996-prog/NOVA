@@ -22,6 +22,98 @@ const ICONS = {
 };
 const Ic = ({ name, size = 14, ...p }) => { const C = ICONS[name] || Box; return <C size={size} strokeWidth={1.6} {...p} />; };
 
+/* ═══════════════ NOVA AI SYSTEM ═══════════════ */
+const SYSTEM_PROMPT = `You are NOVA (Neural Operations & Virtual Assistant) — the personal AI chief of staff for Anwaar, a digital entrepreneur based in Pakistan building multiple web platforms from a smartphone.
+
+Personality: calm, precise, proactive, like JARVIS from Iron Man. Confident, action-oriented. Call Anwaar by name occasionally. Short sharp sentences. Deliver results.
+
+Platforms:
+1. SCHOLARICS (scholarics.com) — Academic tools, GPA Simulator, study guides, Cloudflare Pages, AdSense, target: students
+2. ROOTED — Parenting platform, React+Vite+FastAPI+PostgreSQL, Railway+Supabase, target: USA/UK/Canada/Australia
+
+AGENT ROUTING — start response with [AGENT] ACTIVATED:
+SEO AGENT: "seo","audit","meta","keyword","schema","ranking" → meta title(60), description(155), og tags, JSON-LD schema, 5 keywords, internal links, quick wins
+CONTENT AGENT: "blog","article","write","guide","content" → full SEO article H1/H2s/intro/body/CTA
+SOCIAL AGENT: "instagram","twitter","linkedin","pinterest","social" → IG caption+hashtags, Twitter thread, Pinterest, LinkedIn, Facebook
+YOUTUBE AGENT: "youtube","script","video","shorts","hook" → dramatic hook(NOT a question), full script, 3 titles, description, 15 tags, thumbnail text
+EMAIL AGENT: "email","reply","draft" → 3-bullet summary, draft reply, action items
+ANALYTICS AGENT: "analytics","traffic","adsense","stats","report" → wins, concerns, 3 actions, AdSense tip
+MONITOR AGENT: "uptime","deploy","github","error","broken" → diagnose, Termux fix steps
+IDEAS AGENT: "idea","feature","suggest" → market fit, implementation, monetization
+MARKETS AGENT: "us","uk","australia","canada","localize" → regional adaptation
+MONETIZE AGENT: "monetize","revenue","affiliate","earn","rpm" → AdSense placement, affiliate angles, RPM
+
+End complex outputs with: "Anything else on this, Anwaar?"`;
+
+function detectAgent(t) {
+  t = (t || '').toLowerCase();
+  if (/(seo|audit|meta|keyword|schema|ranking)/.test(t)) return 'SEO AGENT';
+  if (/(blog|article|write|guide|content for)/.test(t)) return 'CONTENT';
+  if (/(instagram|twitter|linkedin|pinterest|social)/.test(t)) return 'SOCIAL';
+  if (/(youtube|script|video|shorts|hook|thumbnail)/.test(t)) return 'YOUTUBE';
+  if (/(email|reply|draft reply)/.test(t)) return 'EMAIL';
+  if (/(analytics|traffic|adsense|stats|report)/.test(t)) return 'ANALYTICS';
+  if (/(uptime|deploy|github|error|broken)/.test(t)) return 'MONITOR';
+  if (/(idea|feature|suggest)/.test(t)) return 'IDEAS';
+  if (/(us market|uk |australia|canada|localize)/.test(t)) return 'MARKETS';
+  if (/(monetize|revenue|affiliate|earn|rpm)/.test(t)) return 'MONETIZE';
+  return 'NOVA';
+}
+
+// Global message history for context
+const novaHistory = [];
+
+async function sendToNOVA(userCmd) {
+  novaHistory.push({ role: 'user', content: userCmd });
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      system: SYSTEM_PROMPT,
+      messages: novaHistory.slice(-10),
+    }),
+  });
+  const data = await res.json();
+  const reply = data.content?.map((c) => c.text || '').join('') || 'Signal lost. Retry.';
+  novaHistory.push({ role: 'assistant', content: reply });
+  return reply;
+}
+
+/* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
+function NOVAOutputModal({ output, agent, onClose }) {
+  if (!output) return null;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 999,
+      background: 'rgba(0,0,0,0.88)', display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      padding: '16px', backdropFilter: 'blur(6px)',
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: 'linear-gradient(160deg, #1a0e03, #0a0500)',
+        border: '1px solid rgba(255,154,38,0.4)',
+        borderRadius: '8px', padding: '20px',
+        width: '100%', maxWidth: '640px',
+        maxHeight: '80vh', overflow: 'auto',
+        boxShadow: '0 0 40px rgba(255,130,10,0.2)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '10px', color: '#ff9a26', letterSpacing: '2px' }}>
+            ⚡ {agent} — OUTPUT
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>CLOSE</button>
+        </div>
+        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#e8c98a', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {output}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 /* deterministic PRNG helpers */
 function mulberry32(a) {
   return function () {
@@ -794,7 +886,22 @@ function ConsolePanel() {
 function CommandBar() {
   const [cmd, setCmd] = useState('');
   const [flash, setFlash] = useState(false);
-  const exec = () => { if (!cmd.trim()) return; setCmd(''); setFlash(true); setTimeout(() => setFlash(false), 480); };
+  const [thinking, setThinking] = useState(false);
+  const [output, setOutput] = useState(null);
+  const [agent, setAgent] = useState('NOVA');
+  const exec = async () => {
+    if (!cmd.trim() || thinking) return;
+    const userCmd = cmd.trim();
+    const det = detectAgent(userCmd);
+    setAgent(det); setCmd(''); setFlash(true);
+    setTimeout(() => setFlash(false), 480);
+    setThinking(true);
+    try {
+      const reply = await sendToNOVA(userCmd);
+      setOutput(reply);
+    } catch { setOutput('Connection interrupted. Retry.'); }
+    finally { setThinking(false); }
+  };
   return (
     <>
       {[Crosshair, Hexagon, TriangleAlert, CircleX, Aperture, Atom].map((Icon, i) => (
@@ -831,6 +938,7 @@ function CommandBar() {
           <button className="sqbtn" style={{ fontFamily: 'var(--fm)', fontSize: 8.5, letterSpacing: 1, color: 'var(--tx-dim)' }}>{c}</button>
         </Chamfer>
       ))}
+      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </>
   );
 }
@@ -1346,11 +1454,20 @@ function MobileWorldMap() {
 function MobileCommandConsole() {
   const [cmd, setCmd] = useState('');
   const [executed, setExecuted] = useState(false);
-  const exec = () => {
-    if (!cmd.trim()) return;
-    setExecuted(true);
-    setCmd('');
-    setTimeout(() => setExecuted(false), 1200);
+  const [thinking, setThinking] = useState(false);
+  const [output, setOutput] = useState(null);
+  const [agent, setAgent] = useState('NOVA');
+  const exec = async () => {
+    if (!cmd.trim() || thinking) return;
+    const userCmd = cmd.trim();
+    const det = detectAgent(userCmd);
+    setAgent(det); setCmd('');
+    setExecuted(true); setThinking(true);
+    try {
+      const reply = await sendToNOVA(userCmd);
+      setOutput(reply);
+    } catch { setOutput('Connection interrupted. Retry.'); }
+    finally { setThinking(false); setTimeout(() => setExecuted(false), 1200); }
   };
   return (
     <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>
@@ -1361,8 +1478,9 @@ function MobileCommandConsole() {
       <div className="mobile-console-input-row">
         <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && exec()} placeholder="ENTER COMMAND..." aria-label="Enter command" />
         <button type="button" className="mobile-mic" title="Voice command"><Mic size={17} /></button>
-        <button type="button" className="mobile-execute" onClick={exec}>EXECUTE</button>
+        <button type="button" className="mobile-execute" onClick={exec}>{thinking ? '...' : 'EXECUTE'}</button>
       </div>
+      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </div>
   );
 }

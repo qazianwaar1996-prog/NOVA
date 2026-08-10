@@ -402,7 +402,7 @@ body {
   z-index: 2;
   width: min(100%, 430px);
   margin: 0 auto;
-  padding: 76px 12px 178px;
+  padding: 68px 12px 165px;
 }
 
 .mobile-topbar {
@@ -412,7 +412,7 @@ body {
   transform: translateX(-50%);
   z-index: 50;
   width: min(100%, 430px);
-  height: 66px;
+  height: 60px;
   padding: 10px 10px 8px;
   display: flex;
   align-items: center;
@@ -922,7 +922,7 @@ body {
 .mobile-command-console {
   position: fixed;
   left: 50%;
-  bottom: 66px;
+  bottom: 60px;
   transform: translateX(-50%);
   z-index: 58;
   width: min(calc(100% - 20px), 410px);
@@ -986,7 +986,7 @@ body {
   transform: translateX(-50%);
   z-index: 60;
   width: min(100%, 430px);
-  height: 66px;
+  height: 60px;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 0;
@@ -1087,18 +1087,18 @@ body {
 }
 
 @media (max-width: 390px) {
-  .mobile-content { padding-left: 12px; padding-right: 12px; padding-bottom: 184px; }
+  .mobile-content { padding-left: 12px; padding-right: 12px; padding-bottom: 162px; }
   .mobile-core-panel .mobile-panel-inner { height: 382px; }
   .mobile-core-svg { max-width: 332px; }
   .mobile-commander .mobile-panel-inner { min-height: 96px; }
   .mobile-console-input-row { grid-template-columns: minmax(0,1fr) 44px 96px; }
-  .mobile-bottom-nav { height: 64px; }
+  .mobile-bottom-nav { height: 60px; }
 }
 
 @media (max-width: 375px) {
-  .mobile-content { padding-left: 10px; padding-right: 10px; padding-bottom: 188px; }
+  .mobile-content { padding-left: 10px; padding-right: 10px; padding-bottom: 164px; }
   .mobile-logo-word { font-size: 24px; letter-spacing: 5.2px; }
-  .mobile-topbar { height: 64px; padding: 9px 9px 7px; }
+  .mobile-topbar { height: 60px; padding: 8px 9px 7px; }
   .mobile-online-pill { padding: 0 7px; font-size: 7.5px; }
   .mobile-icon-button, .mobile-profile-button { width: 34px; height: 34px; }
   .mobile-core-panel .mobile-panel-inner { height: 368px; }
@@ -1114,7 +1114,7 @@ body {
 
 @media (max-width: 320px) {
   .mobile-viewport { overflow-x: hidden; }
-  .mobile-content { padding: 72px 8px 196px; }
+  .mobile-content { padding: 62px 8px 162px; }
   .mobile-topbar { height: 60px; padding: 8px 8px 6px; }
   .mobile-logo-mark { width: 36px; height: 36px; }
   .mobile-logo-word { font-size: 22px; letter-spacing: 4.6px; }
