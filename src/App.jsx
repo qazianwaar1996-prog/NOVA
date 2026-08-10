@@ -4,12 +4,12 @@ import {
   Settings, Network, Activity, Bell, Atom, Power, ChevronRight, CodeXml, Bug, Box,
   Infinity as InfinityIcon, ShieldCheck, PenLine, PenTool, ClipboardCheck, Target, Gauge,
   Mic, Crosshair, TriangleAlert, CircleX, Aperture, Globe, Rocket, Search, FileText,
-  X, Zap, Check, Asterisk, Send,
+  X, Zap, Check, Asterisk, Send, Download, Sparkles, History, Trash2, Clock,
 } from 'lucide-react';
 import { MAP_DOTS } from './dots.js';
 import {
   STATS, NAV, SYS_STATUS, AGENTS_LEFT, AGENTS_RIGHT, FEED, APIS, PERF,
-  PROJECTS, TASKS, CONSOLE_LINES, CMD_CHIPS, HUBS, ARCS,
+  PROJECTS, TASKS, CONSOLE_LINES, CMD_CHIPS, QUICK_PROMPTS, HUBS, ARCS,
 } from './data.js';
 
 const ICONS = {
@@ -19,6 +19,7 @@ const ICONS = {
   'code-xml': CodeXml, 'bug': Bug, 'box': Box, 'infinity': InfinityIcon, 'shield-check': ShieldCheck,
   'pen-line': PenLine, 'pen-tool': PenTool, 'clipboard-check': ClipboardCheck, 'target': Target,
   'gauge': Gauge, 'globe': Globe, 'rocket': Rocket, 'search': Search, 'file-text': FileText,
+  'history': History, 'clock': Clock, 'trash': Trash2,
 };
 const Ic = ({ name, size = 14, ...p }) => { const C = ICONS[name] || Box; return <C size={size} strokeWidth={1.6} {...p} />; };
 
@@ -63,15 +64,164 @@ function detectAgent(t) {
 // Global message history for context
 const novaHistory = [];
 
+/* ═══════════════ PERSISTENT HISTORY (localStorage) ═══════════════ */
+// Append-only ring of recent commands + their responses, capped at 50
+// entries. Persists across sessions via `localStorage` under the key
+// `nova_history` so the user can review past conversations and so
+// NOVA's API context (novaHistory, below) is seeded with recent
+// exchanges on app load.
+const HISTORY_KEY = 'nova_history';
+const MAX_HISTORY = 50;
+const RESTORE_TO_CONTEXT = 10;
+
+// In-memory copy of the persistent history. Initialized from localStorage
+// at module load. Replaced whenever a new entry is pushed.
+let _history = loadHistoryFromStorage();
+
+function loadHistoryFromStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e) => e && typeof e === 'object'
+        && typeof e.timestamp === 'number'
+        && typeof e.cmd === 'string'
+        && typeof e.response === 'string')
+      .slice(-MAX_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function saveHistoryToStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(_history));
+  } catch {
+    // Ignore quota / serialization errors — the in-memory ring still works.
+  }
+}
+
+// Pub/sub so React components re-render when the ring changes.
+const _historySubs = new Set();
+const _emitHistory = () => _historySubs.forEach((fn) => fn(_history));
+
+/* Push a completed command/response into the history. The agent name is
+   stored so the History view can show the right agent icon. */
+function pushHistoryEntry(cmd, agent, response) {
+  if (!cmd || !response) return;
+  const entry = {
+    timestamp: Date.now(),
+    cmd: String(cmd),
+    agent: String(agent || 'NOVA'),
+    response: String(response),
+  };
+  _history = [..._history, entry].slice(-MAX_HISTORY);
+  saveHistoryToStorage();
+  _emitHistory();
+}
+
+/* Remove every entry — both the in-memory ring and the localStorage key. */
+function clearHistory() {
+  _history = [];
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try { window.localStorage.removeItem(HISTORY_KEY); } catch {}
+  }
+  _emitHistory();
+}
+
+/* Seed the AI context (novaHistory) with the last N exchanges. Called
+   once at module load so NOVA "remembers" recent conversations across
+   page reloads. */
+function restoreToNovaContext() {
+  const recent = _history.slice(-RESTORE_TO_CONTEXT);
+  // Walk backwards so the oldest pair lands first and the newest is at
+  // the end (Claude expects a chronological message array).
+  for (let i = 0; i < recent.length; i++) {
+    const e = recent[i];
+    novaHistory.push({ role: 'user', content: e.cmd });
+    novaHistory.push({ role: 'assistant', content: e.response });
+  }
+}
+
+/* React hook: subscribes a component to the history ring. */
+function useNovaHistory() {
+  const [items, setItems] = useState(_history);
+  useEffect(() => {
+    const sub = (next) => setItems(next);
+    _historySubs.add(sub);
+    return () => { _historySubs.delete(sub); };
+  }, []);
+  return items;
+}
+
+// Seed the AI's context from the persisted history on module load. The
+// most recent 10 exchanges (20 messages: 10 user + 10 assistant) are
+// pushed so the next API call has conversational continuity.
+restoreToNovaContext();
+
+/* ═══════════════ WEEKLY REPORT INJECTION ═══════════════ */
+// Heuristic: does this command look like a weekly / Monday briefing ask?
+// Matches "weekly report", "monday morning briefing", "monday brief",
+// "week ahead", "state of the union", and a bare "report" (in the context
+// of a status / weekly ask — not e.g. "bug report").
+const WEEKLY_KEYWORDS = /\b(weekly\s*report|monday\s*(morning\s*)?brief(ing)?|week\s*ahead|week\s*brief|monday\s*brief|monday\s*memo|state\s*of\s*the\s*union)\b/i;
+const BARE_REPORT_RE = /^\s*(give\s+me\s+|run\s+|do\s+|start\s+|show\s+me\s+)?(the\s+)?(weekly\s+)?report\s*[\.!]?\s*$/i;
+
+function isWeeklyReport(text) {
+  if (!text) return false;
+  const t = String(text).toLowerCase().trim();
+  if (WEEKLY_KEYWORDS.test(t)) return true;
+  // Bare "report" — only when the message is short (otherwise "bug report",
+  // "write a report", etc. would false-positive).
+  if (t.length <= 40 && BARE_REPORT_RE.test(t)) return true;
+  return false;
+}
+
+/* Specialized system prompt for the weekly briefing. Asks the model to
+   produce a deterministic three-section format that the parser can
+   reliably slice into the cards the modal renders. The wording here is
+   deliberate so the section headers come out verbatim. */
+const WEEKLY_REPORT_PROMPT = `${SYSTEM_PROMPT}
+
+You are now drafting NOVA's Monday morning briefing for Anwaar. Keep the
+JARVIS tone — calm, precise, action-oriented — but format the response
+as a clean structured report. Use EXACTLY these section headers, in this
+order, each on its own line:
+
+SCHOLARICS WEEKLY:
+- SEO health assessment: 1 sentence, honest and specific
+- Top 3 content opportunities: numbered 1, 2, 3 — one short headline each
+- 3 keywords to target: comma-separated on one line
+- AdSense optimization tip: 1 sentence
+- Recommended blog post topic: 1 short headline + 1 sentence why
+
+ROOTED WEEKLY:
+- Launch readiness status: 1 sentence (e.g. "90% ready — blocked on X")
+- Top 3 content ideas for target market (USA / UK / Canada / Australia): numbered
+- Pinterest strategy tip: 1-2 sentences — Pinterest is the most important channel for parenting
+- SEO preparation checklist item: 1 concrete task for this week
+
+THIS WEEK PRIORITIES:
+- #1 most important action: 1 sentence, decisive
+- Biggest opportunity right now: 1 sentence
+- One thing to stop doing: 1 sentence
+
+End with: "Anything else on this, Anwaar?"`;
+
 async function sendToNOVA(userCmd) {
   novaHistory.push({ role: 'user', content: userCmd });
+  const useWeekly = isWeeklyReport(userCmd);
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
+      max_tokens: 1400,
+      system: useWeekly ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT,
       messages: novaHistory.slice(-10),
     }),
   });
@@ -81,9 +231,1324 @@ async function sendToNOVA(userCmd) {
   return reply;
 }
 
+/* ═══════════════ COMMAND CONSOLE LOG BUS ═══════════════ */
+// Global, append-only ring of console lines. Other components push to it
+// (e.g. CommandBar on each command) and the ConsolePanel subscribes via
+// the useNovaConsole hook to re-render in real time. Capped at MAX lines.
+const MAX_CONSOLE = 50;
+const CONSOLE_TAG_COLORS = {
+  SYSTEM:  '#ff9a26', // orange
+  ROUTER:  '#ffb443', // amber
+  AGENT:   '#ffc24d', // bright orange
+  NOVA:    '#35e08a', // green
+  UPLINK:  '#5ac8ff', // cyan/blue
+  ERROR:   '#ff6a4a', // red
+  MISSION: '#9fe8c4',
+  AI:      '#6aa8ff',
+  SECURITY:'#35e08a',
+  NETWORK: '#9a7bff',
+  DATABASE:'#5ac8ff',
+};
+let _console = [...CONSOLE_LINES];
+const _consoleSubs = new Set();
+const _emitConsole = () => _consoleSubs.forEach((fn) => fn(_console));
+const _tsConsole = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+const pushConsole = (tag, text, opts = {}) => {
+  const color = opts.color || CONSOLE_TAG_COLORS[tag] || '#cfa875';
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    t: opts.t || _tsConsole(),
+    tag,
+    color,
+    text,
+  };
+  _console = [..._console, entry].slice(-MAX_CONSOLE);
+  _emitConsole();
+  return entry;
+};
+function useNovaConsole() {
+  const [items, setItems] = useState(_console);
+  useEffect(() => {
+    const sub = (next) => setItems(next);
+    _consoleSubs.add(sub);
+    return () => { _consoleSubs.delete(sub); };
+  }, []);
+  return items;
+}
+
+/* Sleep helper for sequenced log lines. */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* Stream a sequenced set of log lines for a single command. Each call emits
+   the same six lines (in the user-specified order, with 300ms gaps) and then
+   the SUCCESS / ERROR tail once the API call resolves. */
+async function logNovaCommand(cmd, agent, runFetch) {
+  const t0 = Date.now();
+  const preview = (cmd || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const previewSuffix = (cmd || '').length > 40 ? '…' : '';
+  pushConsole('SYSTEM', `Command received: "${preview}${previewSuffix}"`);
+  await sleep(300);
+  pushConsole('ROUTER', 'Detecting agent...');
+  await sleep(300);
+  pushConsole('AGENT',  `${agent} → Agent activated`);
+  await sleep(300);
+  pushConsole('AGENT',  `${agent} → Processing request...`);
+  try {
+    const reply = await runFetch();
+    await sleep(300);
+    pushConsole('NOVA',   `Response generated successfully (${Date.now() - t0}ms)`);
+    await sleep(300);
+    const summary = (reply || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    pushConsole('UPLINK', `Output delivered to Commander — "${summary}${(reply || '').length > 60 ? '…' : ''}"`);
+    return { ok: true, reply };
+  } catch (err) {
+    pushConsole('ERROR',  `Connection interrupted. ${(err && err.message) || 'Retry.'}`);
+    return { ok: false, reply: 'Connection interrupted. Retry.' };
+  }
+}
+
+/* ═══════════════ LIVE ACTIVITY BUS ═══════════════ */
+// Lightweight pub/sub so CommandBar can push activity to FeedPanel without
+// prop drilling through DesktopNOVA. Subscribers keep a local copy and render.
+const MAX_ACTIVITY = 12;
+let _activity = [...FEED];
+const _activitySubs = new Set();
+const _emitActivity = () => _activitySubs.forEach((fn) => fn(_activity));
+const pushActivity = (entry) => {
+  _activity = [entry, ..._activity].slice(0, MAX_ACTIVITY);
+  _emitActivity();
+};
+function useNovaActivity() {
+  const [items, setItems] = useState(_activity);
+  useEffect(() => {
+    const sub = (next) => setItems(next);
+    _activitySubs.add(sub);
+    // sync in case the bus was updated before this subscriber mounted
+    if (items !== _activity) setItems(_activity);
+    return () => { _activitySubs.delete(sub); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return items;
+}
+const agentIconFor = (a) => {
+  const k = (a || '').toUpperCase();
+  if (k.includes('SEO')) return 'search';
+  if (k.includes('CONTENT')) return 'file-text';
+  if (k.includes('SOCIAL')) return 'globe';
+  if (k.includes('YOUTUBE')) return 'aperture';
+  if (k.includes('EMAIL')) return 'send';
+  if (k.includes('ANALYTICS')) return 'chart-column';
+  if (k.includes('MONITOR')) return 'activity';
+  if (k.includes('IDEAS')) return 'atom';
+  if (k.includes('MARKETS')) return 'globe';
+  if (k.includes('MONETIZE')) return 'gauge';
+  return 'atom';
+};
+const summarizeCmd = (c, n = 60) => {
+  const s = (c || '').replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+};
+const nowStamp = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
+/* ═══════════════ SEO OUTPUT RENDERER ═══════════════ */
+// Heuristic parser that pulls structured sections out of an SEO Agent
+// response. Looks for section headers like "META TAGS", "OG TAGS",
+// "SCHEMA MARKUP", "KEYWORDS", and "QUICK WINS" and captures the body
+// under each one until the next header.
+const SEO_SECTION_RE = /\b(META\s+TAGS?|OG\s+TAGS?|SCHEMA\s+MARKUP|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\b/i;
+const SEO_HEADER_RE = /^\s*(META\s+TAGS?|OG\s+TAGS?|SCHEMA\s+MARKUP|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\s*[:\-]?\s*$/i;
+const SEO_KV_RE = /^([A-Za-z][\w\-\s]{0,40}?(?:\s*\(\s*\d+\s*(?:chars?|ch)?\s*\))?)\s*[:\-]\s+(.+)$/;
+
+function parseSeoOutput(text) {
+  if (!text) return null;
+  const lines = String(text).split(/\r?\n/);
+  // Slice the text into sections by walking the lines and tracking the
+  // current section header. A header is a standalone line (or a line
+  // ending with ':') that matches the known SEO section names.
+  const sections = { _raw: text };
+  let cur = null;
+  let buf = [];
+  const flush = () => {
+    if (!cur) return;
+    sections[cur] = buf.join('\n').trim();
+    buf = [];
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(SEO_HEADER_RE);
+    if (headerMatch) {
+      flush();
+      cur = headerMatch[1].toUpperCase().replace(/[-\s]+/g, ' ').trim();
+      // Normalize a few common variants
+      if (cur === 'JSON LD') cur = 'SCHEMA MARKUP';
+      if (cur === 'META TAG') cur = 'META TAGS';
+      if (cur === 'OG TAG') cur = 'OG TAGS';
+      if (cur === 'KEYWORD') cur = 'KEYWORDS';
+      if (cur === 'QUICK WIN') cur = 'QUICK WINS';
+      continue;
+    }
+    if (cur) buf.push(line);
+  }
+  flush();
+  // --- META TAGS -----------------------------------------------------------
+  const meta = {};
+  const metaBlock = sections['META TAGS'] || '';
+  // Pull key:value pairs from the meta block. Tolerates "(60 chars)" hints.
+  metaBlock.split(/\r?\n/).forEach((ln) => {
+    const m = ln.match(SEO_KV_RE);
+    if (!m) return;
+    const key = m[1].trim().toLowerCase()
+      .replace(/\s*\(\s*\d+\s*(?:chars?|ch)?\s*\)\s*$/, '')
+      .replace(/\s+/g, ' ');
+    if (/^title|^meta\s*title/.test(key)) meta.title = m[2].trim();
+    else if (/^desc/.test(key)) meta.description = m[2].trim();
+    else if (/^keywords?/.test(key)) meta.keywords = m[2].trim();
+    else if (/^canonical/.test(key)) meta.canonical = m[2].trim();
+    else if (/^robots/.test(key)) meta.robots = m[2].trim();
+  });
+  // --- OG TAGS -------------------------------------------------------------
+  const og = {};
+  const ogBlock = sections['OG TAGS'] || '';
+  ogBlock.split(/\r?\n/).forEach((ln) => {
+    const m = ln.match(SEO_KV_RE);
+    if (!m) return;
+    const key = m[1].trim().toLowerCase().replace(/^og\s+/, 'og:').replace(/\s+/g, '');
+    const val = m[2].trim();
+    if (/^og:/.test(key)) og[key] = val;
+  });
+  // Also try to capture og:xxx = "yyy" pairs from inside code blocks if the
+  // og section is empty.
+  if (Object.keys(og).length === 0) {
+    const re = /og:([a-z\-]+)\s*[:=]\s*"?([^"\n]+?)"?\s*$/gim;
+    let m;
+    while ((m = re.exec(text)) !== null) og[`og:${m[1].toLowerCase()}`] = m[2].trim();
+  }
+  // --- SCHEMA MARKUP -------------------------------------------------------
+  let schema = '';
+  // Prefer a fenced code block (json / jsonld / html) sitting under the
+  // SCHEMA MARKUP section, otherwise grab the raw section.
+  const schemaBlock = sections['SCHEMA MARKUP'] || '';
+  const fenced = schemaBlock.match(/```(?:json|jsonld|html)?\n([\s\S]*?)```/);
+  if (fenced) {
+    schema = fenced[1].trim();
+  } else if (schemaBlock) {
+    // Strip the first line if it's just a section header echo
+    const cleaned = schemaBlock.replace(/^\s*(here'?s|schema|json-?ld)\s*[:\-]?\s*/i, '');
+    schema = cleaned.trim();
+  }
+  // --- KEYWORDS ------------------------------------------------------------
+  const kwBlock = sections['KEYWORDS'] || '';
+  const keywords = [];
+  // Strip an optional leading list marker (e.g. "1. ", "- ", "• ") from a
+  // single line of text. Doesn't eat leading digits from real words like
+  // "4.0 scale" — only matches when the digit is followed by `.` or `)`.
+  const stripListMarker = (s) => s
+    .replace(/^\s*(?:\d+[.)]\s+|[-*•]\s+)/, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+  if (kwBlock) {
+    // First try comma-separated
+    const csv = kwBlock.match(/([^\n]+(?:,[^\n]+)+)/);
+    if (csv) {
+      csv[1].split(',').forEach((k) => {
+        const t = stripListMarker(k.trim());
+        if (t) keywords.push(t);
+      });
+    }
+    // Also pull numbered / bulleted items, dedup
+    const seen = new Set(keywords.map((k) => k.toLowerCase()));
+    kwBlock.split(/\r?\n/).forEach((ln) => {
+      const m = ln.match(/^\s*(?:\d+[\.\)]\s*|[\-\*\u2022]\s*)(.+)$/);
+      if (!m) return;
+      const t = stripListMarker(m[1]);
+      if (t && !seen.has(t.toLowerCase())) { keywords.push(t); seen.add(t.toLowerCase()); }
+    });
+  }
+  // --- QUICK WINS ----------------------------------------------------------
+  const winsBlock = sections['QUICK WINS'] || '';
+  const wins = [];
+  if (winsBlock) {
+    winsBlock.split(/\r?\n/).forEach((ln) => {
+      const m = ln.match(/^\s*(?:\d+[\.\)]\s*|[\-\*\u2022]\s*)(.+)$/);
+      if (m) wins.push(m[1].trim());
+      else if (ln.trim() && wins.length === 0) wins.push(ln.trim());
+    });
+    // If we still didn't get numbered items, fall back to splitting on
+    // sentence boundaries.
+    if (wins.length === 0) {
+      winsBlock.split(/(?<=\.)\s+(?=[A-Z])/).forEach((s) => {
+        const t = s.trim();
+        if (t) wins.push(t);
+      });
+    }
+  }
+  // Heuristic: did we actually find anything SEO-shaped?
+  const hit = (
+    Object.keys(meta).length > 0 ||
+    Object.keys(og).length > 0 ||
+    schema ||
+    keywords.length > 0 ||
+    wins.length > 0
+  );
+  return hit ? { meta, og, schema, keywords, wins } : null;
+}
+
+/* Detect if the response is an SEO-shaped payload. */
+function isSeoResponse(agent, text) {
+  if (/SEO/i.test(agent || '')) return true;
+  if (!text) return false;
+  return /meta\s+title|og:title|json-?ld|schema\s+markup|quick\s+wins/i.test(text);
+}
+
+/* ═══════════════ WEEKLY REPORT PARSER ═══════════════ */
+// Splits a Monday-morning briefing into the three sections (Scholarics,
+// Rooted, Priorities) and pulls out the labelled sub-fields under each
+// one. The labels come from the specialized system prompt above.
+const WR_SECTION_RE = /^\s*(SCHOLARICS\s+WEEKLY|ROOTED\s+WEEKLY|THIS\s+WEEK\s+PRIORITIES)\s*:\s*$/i;
+const WR_LABEL_RE = /^\s*[-•]?\s*([^:\n]{2,60})\s*:\s*(.+?)\s*$/;
+// Items in lists inside a section (numbered or bulleted). Returns the
+// cleaned headline, or null if the line isn't a list item.
+const WR_LIST_RE = /^\s*(?:\d+[\.\)]\s*|[-*•]\s*)(.+?)\s*$/;
+// Lines like "3 keywords to target: foo, bar, baz" — a comma-separated
+// field rendered as inline chips.
+
+function parseWeeklyReport(text) {
+  if (!text) return null;
+  const lines = String(text).split(/\r?\n/);
+
+  // Slice into three buckets by section header.
+  const buckets = { scholarics: [], rooted: [], priorities: [] };
+  let current = null;
+  for (const line of lines) {
+    const m = line.trim().match(WR_SECTION_RE);
+    if (m) {
+      // The matched header is "SCHOLARICS WEEKLY", "ROOTED WEEKLY", or
+      // "THIS WEEK PRIORITIES". Normalize to a bucket key.
+      const header = m[1].toLowerCase();
+      if (header.startsWith('scholarics')) current = 'scholarics';
+      else if (header.startsWith('rooted')) current = 'rooted';
+      else current = 'priorities';
+      continue;
+    }
+    if (current && buckets[current]) buckets[current].push(line);
+  }
+
+  // Pull labelled key:value lines AND list items out of a bucket, in order.
+  const parseBucket = (rawLines) => {
+    const fields = []; // ordered list of { kind, label?, text? | items? }
+    for (const ln of rawLines) {
+      if (!ln.trim()) continue;
+      const lab = ln.match(WR_LABEL_RE);
+      if (lab) {
+        const label = lab[1].trim();
+        const value = lab[2].trim();
+        // Comma-separated field? Only treat it as a list of chips when the
+        // value is a single short line with 2+ commas AND the label hints
+        // at a list ("keywords", "ideas", "opportunities", "priorities").
+        const looksLikeList = /keyword|opportunit|idea|priorit|action/i.test(label);
+        if (looksLikeList && value.includes(',')) {
+          const items = value.split(',').map((s) => s.trim()).filter(Boolean);
+          if (items.length >= 2) {
+            fields.push({ kind: 'list', label, items });
+            continue;
+          }
+        }
+        fields.push({ kind: 'field', label, text: value });
+        continue;
+      }
+      const li = ln.match(WR_LIST_RE);
+      if (li) {
+        let item = li[1].trim();
+        // A list item that ends with ":" is a header for the items that
+        // follow, not an item itself. Promote it to a labelled numbered
+        // list so the rendering can use it as a section title.
+        if (item.endsWith(':')) {
+          fields.push({ kind: 'numbered', label: item.slice(0, -1).trim(), items: [] });
+          continue;
+        }
+        const last = fields[fields.length - 1];
+        if (last && last.kind === 'numbered') {
+          last.items.push(item);
+        } else {
+          fields.push({ kind: 'numbered', label: '', items: [item] });
+        }
+        continue;
+      }
+      // Free-floating sentence — attach to the previous field if it was
+      // a list/headline; otherwise stash as its own paragraph.
+      const last = fields[fields.length - 1];
+      if (last && (last.kind === 'numbered' || last.kind === 'list') && last.label === '') {
+        last.items[last.items.length - 1] += ' — ' + ln.trim();
+      } else {
+        fields.push({ kind: 'paragraph', text: ln.trim() });
+      }
+    }
+    return fields;
+  };
+
+  const out = {
+    scholarics: parseBucket(buckets.scholarics),
+    rooted: parseBucket(buckets.rooted),
+    priorities: parseBucket(buckets.priorities),
+  };
+
+  // Heuristic: did we find at least one labelled field in any section?
+  const totalFields = out.scholarics.length + out.rooted.length + out.priorities.length;
+  return totalFields > 0 ? out : null;
+}
+
+/* Inline pretty-print a JSON-LD string with a touch of syntax highlighting
+   (keys green, strings orange, numbers cyan, braces dim). Used for the
+   SCHEMA MARKUP code panel. */
+function highlightJson(json) {
+  if (!json) return null;
+  // Tokenize: strings (incl. escaped), numbers, braces, brackets, colons, commas
+  const tokens = [];
+  const re = /("(?:\\.|[^"\\])*"\s*:?)|(\btrue\b|\bfalse\b|\bnull\b)|(-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)|([\{\}\[\],])/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(json)) !== null) {
+    if (m.index > last) tokens.push({ t: 'raw', v: json.slice(last, m.index) });
+    if (m[1] !== undefined) {
+      // is it a key? (ends with `:`)
+      if (m[1].endsWith(':')) tokens.push({ t: 'key', v: m[1].slice(0, -1) });
+      else tokens.push({ t: 'str', v: m[1] });
+    } else if (m[2] !== undefined) tokens.push({ t: 'lit', v: m[2] });
+    else if (m[3] !== undefined) tokens.push({ t: 'num', v: m[3] });
+    else if (m[4] !== undefined) tokens.push({ t: 'punc', v: m[4] });
+    last = m.index + m[0].length;
+  }
+  if (last < json.length) tokens.push({ t: 'raw', v: json.slice(last) });
+  const style = {
+    key:  { color: '#9be8b6' },         // green for keys
+    str:  { color: '#ffb97a' },         // warm orange for string values
+    num:  { color: '#5ac8ff' },         // cyan for numbers
+    lit:  { color: '#c08aff' },         // purple for true/false/null
+    punc: { color: '#9a7bff' },         // muted purple for punctuation
+    raw:  { color: '#ffd9a8' },
+  };
+  return tokens.map((tk, i) => (
+    <span key={i} style={style[tk.t]}>{tk.v}</span>
+  ));
+}
+
+/* Shared visual primitives for the SEO modal --------------------------- */
+const ORANGE = '#ff9a26';
+const ORANGE_DIM = 'rgba(255,154,38,0.35)';
+const ORANGE_SOFT = 'rgba(255,154,38,0.18)';
+const MONO = '"Share Tech Mono", "JetBrains Mono", ui-monospace, monospace';
+const sectionHeaderStyle = (extra = {}) => ({
+  fontFamily: 'Orbitron, monospace',
+  fontSize: 10,
+  letterSpacing: 2.4,
+  color: ORANGE,
+  textTransform: 'uppercase',
+  borderBottom: `1px solid ${ORANGE_DIM}`,
+  paddingBottom: 4,
+  margin: '14px 0 8px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  ...extra,
+});
+const copyableInputStyle = {
+  width: '100%',
+  background: 'rgba(0,0,0,0.55)',
+  border: '1px solid rgba(255,154,38,0.25)',
+  borderRadius: 4,
+  padding: '8px 10px',
+  color: '#ffd9a8',
+  fontFamily: MONO,
+  fontSize: 11,
+  boxSizing: 'border-box',
+  outline: 'none',
+};
+const sectionLabel = {
+  fontSize: 9,
+  letterSpacing: 1.6,
+  color: '#cfa875',
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  marginBottom: 4,
+  display: 'block',
+};
+const codePanelStyle = {
+  background: 'rgba(0,0,0,0.6)',
+  border: `1px solid ${ORANGE_DIM}`,
+  borderRadius: 4,
+  padding: '10px 12px',
+  margin: '8px 0',
+  fontFamily: MONO,
+  fontSize: 11,
+  color: '#ffd9a8',
+  overflowX: 'auto',
+  whiteSpace: 'pre',
+  lineHeight: 1.55,
+};
+const btnStyle = {
+  background: 'none',
+  border: `1px solid ${ORANGE_DIM}`,
+  color: ORANGE,
+  cursor: 'pointer',
+  padding: '4px 10px',
+  fontSize: 9.5,
+  borderRadius: 3,
+  fontFamily: MONO,
+  letterSpacing: 1,
+};
+/* Small wrapper around navigator.clipboard with an execCommand fallback. */
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  }
+}
+
+/* SEO Modal — renders the parsed sections. Receives the original raw
+   `output` so it can still COPY ALL the original text. */
+function SEOModalBody({ output }) {
+  const seo = useMemo(() => parseSeoOutput(output), [output]);
+  const [copiedField, setCopiedField] = useState(null);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [doneWins, setDoneWins] = useState({});
+
+  if (!seo) {
+    // Should not normally happen because the parent decides whether to
+    // render this body, but fall back to the plain text.
+    return <pre style={codePanelStyle}>{output}</pre>;
+  }
+
+  const { meta, og, schema, keywords, wins } = seo;
+  const hasOg = Object.keys(og).length > 0;
+  const standardOg = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type', 'og:site_name'];
+  const ogEntries = standardOg
+    .filter((k) => og[k])
+    .map((k) => [k, og[k]])
+    .concat(Object.keys(og).filter((k) => !standardOg.includes(k)).map((k) => [k, og[k]]));
+
+  const flashCopied = (setter, key) => {
+    setter(key);
+    setTimeout(() => setter(null), 1400);
+  };
+
+  const onCopyField = async (key, value) => {
+    const ok = await copyToClipboard(value);
+    if (ok) flashCopied(setCopiedField, key);
+  };
+  const onCopyCode = async () => {
+    const ok = await copyToClipboard(schema);
+    if (ok) { setCopiedCode(true); setTimeout(() => setCopiedCode(false), 1400); }
+  };
+
+  return (
+    <div>
+      {/* ── META TAGS ─────────────────────────────────────────────── */}
+      {Object.keys(meta).length > 0 && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Meta Tags</div>
+          {meta.title !== undefined && (
+            <div style={{ marginBottom: 8 }}>
+              <span style={sectionLabel}>Title ({meta.title.length}/60)</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                <input
+                  readOnly
+                  value={meta.title}
+                  onFocus={(e) => e.target.select()}
+                  style={copyableInputStyle}
+                />
+                <button
+                  style={btnStyle}
+                  onClick={() => onCopyField('title', meta.title)}
+                  title="Copy meta title"
+                >{copiedField === 'title' ? 'COPIED' : 'COPY'}</button>
+              </div>
+              <div style={{ height: 2, marginTop: 4, background: 'rgba(255,154,38,0.12)', borderRadius: 1 }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(100, (meta.title.length / 60) * 100)}%`,
+                  background: meta.title.length > 60 ? '#ff6a4a' : ORANGE,
+                  boxShadow: `0 0 6px ${meta.title.length > 60 ? '#ff6a4a' : ORANGE}`,
+                }} />
+              </div>
+            </div>
+          )}
+          {meta.description !== undefined && (
+            <div style={{ marginBottom: 8 }}>
+              <span style={sectionLabel}>Description ({meta.description.length}/155)</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                <textarea
+                  readOnly
+                  rows={3}
+                  value={meta.description}
+                  onFocus={(e) => e.target.select()}
+                  style={{ ...copyableInputStyle, resize: 'vertical', minHeight: 56 }}
+                />
+                <button
+                  style={btnStyle}
+                  onClick={() => onCopyField('description', meta.description)}
+                  title="Copy meta description"
+                >{copiedField === 'description' ? 'COPIED' : 'COPY'}</button>
+              </div>
+              <div style={{ height: 2, marginTop: 4, background: 'rgba(255,154,38,0.12)', borderRadius: 1 }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(100, (meta.description.length / 155) * 100)}%`,
+                  background: meta.description.length > 155 ? '#ff6a4a' : ORANGE,
+                  boxShadow: `0 0 6px ${meta.description.length > 155 ? '#ff6a4a' : ORANGE}`,
+                }} />
+              </div>
+            </div>
+          )}
+          {meta.canonical && (
+            <CopyableRow label="Canonical" value={meta.canonical}
+              copied={copiedField === 'canonical'}
+              onCopy={() => onCopyField('canonical', meta.canonical)} />
+          )}
+          {meta.robots && (
+            <CopyableRow label="Robots" value={meta.robots}
+              copied={copiedField === 'robots'}
+              onCopy={() => onCopyField('robots', meta.robots)} />
+          )}
+        </>
+      )}
+
+      {/* ── OG TAGS ────────────────────────────────────────────────── */}
+      {hasOg && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Open Graph Tags</div>
+          {ogEntries.map(([k, v]) => (
+            <CopyableRow
+              key={k}
+              label={k}
+              value={v}
+              copied={copiedField === k}
+              onCopy={() => onCopyField(k, v)}
+            />
+          ))}
+        </>
+      )}
+
+      {/* ── SCHEMA MARKUP ──────────────────────────────────────────── */}
+      {schema && (
+        <>
+          <div style={sectionHeaderStyle({
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          })}>
+            <span>▸ Schema Markup (JSON-LD)</span>
+            <button
+              style={{ ...btnStyle, color: copiedCode ? '#35e08a' : ORANGE }}
+              onClick={onCopyCode}
+              title="Copy JSON-LD code"
+            >{copiedCode ? '✓ COPIED' : '⎘ COPY CODE'}</button>
+          </div>
+          <pre style={codePanelStyle}>{highlightJson(schema)}</pre>
+        </>
+      )}
+
+      {/* ── KEYWORDS ───────────────────────────────────────────────── */}
+      {keywords.length > 0 && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Keywords ({keywords.length})</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '2px 0 4px' }}>
+            {keywords.map((k, i) => (
+              <span
+                key={`${k}-${i}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '4px 9px',
+                  background: 'rgba(255,154,38,0.10)',
+                  border: `1px solid ${ORANGE_SOFT}`,
+                  color: '#ffc24d',
+                  borderRadius: 999,
+                  fontFamily: MONO,
+                  fontSize: 10,
+                  letterSpacing: 0.4,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: ORANGE, boxShadow: `0 0 5px ${ORANGE}` }} />
+                {k}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── QUICK WINS ─────────────────────────────────────────────── */}
+      {wins.length > 0 && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Quick Wins ({wins.length})</div>
+          <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {wins.map((w, i) => {
+              const done = !!doneWins[i];
+              return (
+                <li
+                  key={i}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 9,
+                    padding: '6px 4px',
+                    borderTop: i === 0 ? 'none' : '1px dashed rgba(255,154,38,0.10)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setDoneWins((d) => ({ ...d, [i]: !d[i] }))}
+                    style={{
+                      flex: 'none',
+                      width: 16, height: 16, marginTop: 2,
+                      borderRadius: 3,
+                      background: done ? ORANGE : 'transparent',
+                      border: `1px solid ${done ? ORANGE : ORANGE_DIM}`,
+                      color: done ? '#1a0e03' : ORANGE,
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, lineHeight: 1, fontWeight: 700,
+                      boxShadow: done ? `0 0 6px ${ORANGE}` : 'none',
+                    }}
+                    aria-pressed={done}
+                    aria-label={done ? 'Mark incomplete' : 'Mark complete'}
+                  >{done ? '✓' : ''}</button>
+                  <span style={{
+                    flex: 'none',
+                    width: 18, fontFamily: MONO, fontSize: 10, color: ORANGE,
+                    fontWeight: 700, textAlign: 'right',
+                  }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span style={{
+                    flex: 1,
+                    color: done ? '#7a5a36' : '#e8c98a',
+                    textDecoration: done ? 'line-through' : 'none',
+                    lineHeight: 1.5,
+                  }}>{w}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      )}
+
+      {/* Anything we couldn't classify is shown as a small footer block */}
+      <div style={{ marginTop: 16, fontSize: 9, color: '#7a5a36', textAlign: 'center', letterSpacing: 1 }}>
+        END OF SEO PAYLOAD · {Object.keys(meta).length + ogEntries.length + (schema ? 1 : 0) + keywords.length + wins.length} FIELDS
+      </div>
+    </div>
+  );
+}
+
+function CopyableRow({ label, value, copied, onCopy }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <span style={sectionLabel}>{label}</span>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+        <input
+          readOnly
+          value={value}
+          onFocus={(e) => e.target.select()}
+          style={copyableInputStyle}
+        />
+        <button
+          style={{ ...btnStyle, color: copied ? '#35e08a' : ORANGE }}
+          onClick={onCopy}
+          title={`Copy ${label}`}
+        >{copied ? 'COPIED' : 'COPY'}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════ WEEKLY REPORT MODAL ═══════════════ */
+// Renders the parsed Monday morning briefing as three color-coded cards
+// (Scholarics, Rooted, Priorities) with structured fields. Also offers
+// a DOWNLOAD .MD button so Anwaar can save the briefing for later.
+const WR_PALETTE = {
+  scholarics: { accent: ORANGE, glow: 'rgba(255,154,38,0.30)', soft: 'rgba(255,154,38,0.10)', icon: Search, tagline: 'STUDENT-FACING · ACADEMIC TOOLS' },
+  rooted:     { accent: '#35e08a', glow: 'rgba(53,224,138,0.30)', soft: 'rgba(53,224,138,0.10)', icon: Globe,  tagline: 'PARENTING · USA / UK / CA / AU' },
+  priorities: { accent: '#ff6a4a', glow: 'rgba(255,106,74,0.30)', soft: 'rgba(255,106,74,0.10)', icon: Rocket, tagline: 'THIS WEEK · DECISIVE MOVES' },
+};
+
+function WRCard({ title, kicker, fields, palette, copyField, copiedKey, idx }) {
+  const Icon = palette.icon;
+  return (
+    <section
+      style={{
+        position: 'relative',
+        margin: '14px 0 18px',
+        borderRadius: 6,
+        background: 'linear-gradient(160deg, rgba(20,10,4,0.85), rgba(8,4,1,0.92))',
+        border: `1px solid ${palette.glow}`,
+        boxShadow: `0 0 18px ${palette.soft}, inset 0 0 0 1px rgba(0,0,0,0.4)`,
+        overflow: 'hidden',
+      }}
+    >
+      {/* top accent bar */}
+      <div style={{ height: 2, background: `linear-gradient(90deg, transparent, ${palette.accent}, transparent)`, opacity: 0.85 }} />
+      {/* header */}
+      <header style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 14px 8px',
+        borderBottom: `1px solid ${palette.glow}`,
+        background: `linear-gradient(180deg, ${palette.soft}, transparent)`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span style={{
+            width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: `linear-gradient(160deg, ${palette.soft}, rgba(0,0,0,0.5))`,
+            border: `1px solid ${palette.glow}`,
+            borderRadius: 4, color: palette.accent,
+            boxShadow: `0 0 8px ${palette.soft}`,
+          }}><Icon size={14} strokeWidth={1.8} /></span>
+          <div>
+            <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 11, color: palette.accent, letterSpacing: 2.2, fontWeight: 700 }}>
+              {title}
+            </div>
+            <div style={{ fontFamily: 'var(--fm)', fontSize: 8, color: '#7a5a36', letterSpacing: 1.4, marginTop: 2 }}>
+              {kicker}
+            </div>
+          </div>
+        </div>
+        <div style={{
+          fontFamily: 'var(--fm)', fontSize: 8, color: '#5c452c',
+          letterSpacing: 1.6,
+        }}>CARD {String(idx).padStart(2, '0')}/03</div>
+      </header>
+      {/* body */}
+      <div style={{ padding: '12px 14px 14px' }}>
+        {fields.map((f, i) => {
+          if (f.kind === 'field') {
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={sectionLabel}>{f.label}</span>
+                  <button
+                    style={{ ...btnStyle, padding: '2px 8px', fontSize: 8.5 }}
+                    onClick={() => copyField(`${title}-${i}`, f.text)}
+                    title={`Copy "${f.label}"`}
+                  >{copiedKey === `${title}-${i}` ? '✓ COPIED' : '⎘ COPY'}</button>
+                </div>
+                <div style={{
+                  background: 'rgba(0,0,0,0.45)',
+                  border: '1px solid rgba(255,154,38,0.18)',
+                  borderLeft: `2px solid ${palette.accent}`,
+                  borderRadius: 3,
+                  padding: '8px 10px',
+                  color: '#ffd9a8',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  fontFamily: 'var(--fb), system-ui, sans-serif',
+                }}>{f.text}</div>
+              </div>
+            );
+          }
+          if (f.kind === 'list') {
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <span style={sectionLabel}>{f.label}</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {f.items.map((it, j) => (
+                    <span
+                      key={j}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        padding: '4px 10px',
+                        background: palette.soft,
+                        border: `1px solid ${palette.glow}`,
+                        color: palette.accent,
+                        borderRadius: 999,
+                        fontFamily: 'var(--fm)', fontSize: 10.5, letterSpacing: 0.4,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: palette.accent, boxShadow: `0 0 5px ${palette.accent}` }} />
+                      {it}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          if (f.kind === 'numbered') {
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                {f.label && <span style={sectionLabel}>{f.label}</span>}
+                <ol style={{ listStyle: 'none', padding: 0, margin: f.label ? '4px 0 0' : 0 }}>
+                  {f.items.map((it, j) => (
+                    <li
+                      key={j}
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 9,
+                        padding: '6px 0',
+                        borderTop: j === 0 ? 'none' : `1px dashed ${palette.soft}`,
+                      }}
+                    >
+                      <span style={{
+                        flex: 'none',
+                        width: 22, height: 22, marginTop: 1,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: `linear-gradient(160deg, ${palette.soft}, rgba(0,0,0,0.5))`,
+                        border: `1px solid ${palette.glow}`,
+                        borderRadius: 3,
+                        color: palette.accent, fontFamily: 'var(--fm)',
+                        fontSize: 10, fontWeight: 700,
+                      }}>{String(j + 1).padStart(2, '0')}</span>
+                      <span style={{ flex: 1, color: '#ffd9a8', fontSize: 12, lineHeight: 1.5 }}>{it}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            );
+          }
+          // paragraph
+          return <p key={i} style={{ margin: '0 0 8px', color: '#cfa875', fontSize: 12, lineHeight: 1.5 }}>{f.text}</p>;
+        })}
+        {fields.length === 0 && (
+          <div style={{ color: '#7a5a36', fontSize: 11, fontStyle: 'italic', textAlign: 'center', padding: '8px 0' }}>
+            No data for this section in the response.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* Convert a parsed report back into a clean markdown document so the
+   DOWNLOAD .MD button produces a useful artifact. */
+function weeklyReportToMarkdown(parsed) {
+  const sectionTitles = {
+    scholarics: 'SCHOLARICS WEEKLY',
+    rooted: 'ROOTED WEEKLY',
+    priorities: 'THIS WEEK PRIORITIES',
+  };
+  const tags = {
+    scholarics: '📚 scholarics.com — student-facing academic tools',
+    rooted: '🌱 rooted — parenting platform, USA / UK / CA / AU',
+    priorities: '🎯 decisive actions for the week',
+  };
+  const stamp = new Date().toISOString().slice(0, 10);
+  const lines = [];
+  lines.push(`# NOVA Monday Morning Briefing — ${stamp}`);
+  lines.push('');
+  lines.push('_Prepared by NOVA, the AI chief of staff._');
+  lines.push('');
+  for (const key of ['scholarics', 'rooted', 'priorities']) {
+    const fields = parsed[key] || [];
+    if (fields.length === 0) continue;
+    lines.push(`## ${sectionTitles[key]}`);
+    lines.push(`_${tags[key]}_`);
+    lines.push('');
+    for (const f of fields) {
+      if (f.kind === 'field') {
+        lines.push(`**${f.label}** — ${f.text}`);
+      } else if (f.kind === 'list') {
+        lines.push(`**${f.label}** — ${f.items.join(', ')}`);
+      } else if (f.kind === 'numbered') {
+        if (f.label) lines.push(`**${f.label}**`);
+        f.items.forEach((it, i) => lines.push(`${i + 1}. ${it}`));
+      } else {
+        lines.push(f.text);
+      }
+      lines.push('');
+    }
+  }
+  lines.push('---');
+  lines.push('_Anything else on this, Anwaar?_');
+  return lines.join('\n');
+}
+
+function WeeklyReportModalBody({ output }) {
+  const parsed = useMemo(() => parseWeeklyReport(output), [output]);
+  const [copiedKey, setCopiedKey] = useState(null);
+  const [downloaded, setDownloaded] = useState(false);
+
+  if (!parsed) {
+    return <pre style={codePanelStyle}>{output}</pre>;
+  }
+
+  const copyField = async (key, text) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1400);
+    }
+  };
+
+  const downloadMd = async () => {
+    const md = weeklyReportToMarkdown(parsed);
+    const ok = await copyToClipboard(md);
+    // Always try the file download regardless of clipboard result.
+    try {
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `nova-monday-briefing-${stamp}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch {}
+    if (ok) {
+      setDownloaded(true);
+      setTimeout(() => setDownloaded(false), 1800);
+    }
+  };
+
+  return (
+    <div>
+      {/* Subtle report header banner */}
+      <div style={{
+        margin: '0 0 6px',
+        padding: '10px 12px',
+        background: 'linear-gradient(135deg, rgba(255,154,38,0.10), rgba(53,224,138,0.06), rgba(255,106,74,0.08))',
+        border: '1px solid rgba(255,154,38,0.22)',
+        borderRadius: 4,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Sparkles size={14} color={ORANGE} strokeWidth={1.8} />
+          <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 2.2 }}>
+            MONDAY MORNING BRIEFING
+          </span>
+        </div>
+        <span style={{ fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1.2 }}>
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}
+        </span>
+      </div>
+
+      <WRCard title="SCHOLARICS WEEKLY" kicker={WR_PALETTE.scholarics.tagline}
+        palette={WR_PALETTE.scholarics} fields={parsed.scholarics} idx={1}
+        copyField={copyField} copiedKey={copiedKey} />
+      <WRCard title="ROOTED WEEKLY" kicker={WR_PALETTE.rooted.tagline}
+        palette={WR_PALETTE.rooted} fields={parsed.rooted} idx={2}
+        copyField={copyField} copiedKey={copiedKey} />
+      <WRCard title="THIS WEEK PRIORITIES" kicker={WR_PALETTE.priorities.tagline}
+        palette={WR_PALETTE.priorities} fields={parsed.priorities} idx={3}
+        copyField={copyField} copiedKey={copiedKey} />
+
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0 4px' }}>
+        <button
+          onClick={downloadMd}
+          style={{
+            background: 'linear-gradient(180deg, rgba(255,154,38,0.18), rgba(255,154,38,0.06))',
+            border: '1px solid rgba(255,154,38,0.45)',
+            color: downloaded ? '#35e08a' : ORANGE,
+            cursor: 'pointer',
+            padding: '8px 16px',
+            fontSize: 10,
+            letterSpacing: 1.8,
+            fontFamily: 'Orbitron, monospace',
+            fontWeight: 700,
+            borderRadius: 4,
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            boxShadow: '0 0 12px rgba(255,154,38,0.20)',
+          }}
+        >
+          <Download size={12} strokeWidth={2} />
+          {downloaded ? '✓ DOWNLOADED & COPIED' : 'DOWNLOAD .MD'}
+        </button>
+      </div>
+
+      <div style={{ textAlign: 'center', fontSize: 9, color: '#7a5a36', letterSpacing: 1.4, marginTop: 8 }}>
+        END OF BRIEFING · 3 PLATFORMS · {(parsed.scholarics.length + parsed.rooted.length + parsed.priorities.length)} FIELDS
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════ VOICE INPUT (Web Speech API) ═══════════════ */
+// Cross-browser SpeechRecognition handle + a React hook that drives a
+// controlled `<input>` from interim + final transcripts, plus a small
+// mic button that glows while listening.
+
+/* Resolve the constructor across vendors. The standard `SpeechRecognition`
+   is on `window` in modern Chrome / Edge; older WebKit uses the
+   `webkitSpeechRecognition` alias. */
+function getSpeechRecognitionCtor() {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+const VOICE_SUPPORTED = !!getSpeechRecognitionCtor();
+
+/* Human-friendly message for each SpeechRecognitionErrorEvent.error code.
+   Returns the error code as a fallback so the UI is never blank. */
+function voiceErrorMessage(code) {
+  switch (code) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone access denied';
+    case 'no-speech':
+      return 'No speech detected. Try again.';
+    case 'audio-capture':
+      return 'No microphone found';
+    case 'network':
+      return 'Network error. Voice requires a connection.';
+    case 'aborted':
+      return null; // user-initiated stop — not really an error
+    case 'language-not-supported':
+      return 'Language not supported';
+    default:
+      return code ? `Voice error: ${code}` : 'Voice error';
+  }
+}
+
+/* useVoiceInput
+   ─────────────
+   Hooks an input element to a SpeechRecognition session.
+
+   @param onFinal(text)   called once with the final transcript when
+                          the session ends normally. The input is also
+                          kept in sync so callers don't need to wire
+                          the value themselves.
+   @returns
+     supported   – boolean, true if the browser exposes SpeechRecognition
+     listening   – true while a session is active
+     interim     – the latest interim transcript (or '')
+     error       – human-readable error string (cleared on next start)
+     start()     – begin a new session (resets any prior error)
+     stop()      – end the active session cleanly
+   */
+function useVoiceInput({ onFinal } = {}) {
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState('');
+  const [error, setError] = useState(null);
+  const recRef = useRef(null);
+  // Keep the latest onFinal in a ref so the recognition handlers don't
+  // have to re-bind every time the parent re-renders.
+  const onFinalRef = useRef(onFinal);
+  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+
+  // Cleanup on unmount.
+  useEffect(() => () => {
+    if (recRef.current) {
+      try { recRef.current.abort(); } catch {}
+      recRef.current = null;
+    }
+  }, []);
+
+  const start = () => {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      setError('Voice not supported on this browser');
+      return false;
+    }
+    // If a session is already running, restart it (acts as a stop+start).
+    if (recRef.current) {
+      try { recRef.current.abort(); } catch {}
+      recRef.current = null;
+    }
+    setError(null);
+    setInterim('');
+    const rec = new Ctor();
+    rec.lang = 'en-US';
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+
+    let finalText = '';
+    rec.onresult = (e) => {
+      // Stitch together every result returned by the event so we never
+      // lose a piece of the sentence when the user pauses mid-utterance.
+      let interimChunk = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        const transcript = (res[0] && res[0].transcript) || '';
+        if (res.isFinal) finalText += transcript;
+        else interimChunk += transcript;
+      }
+      setInterim(interimChunk);
+      // We don't push interim into onFinal's call — the parent already
+      // sees `interim` in the hook return. Final transcript is delivered
+      // when the session ends, after the final chunks have all arrived.
+      if (finalText) {
+        recRef.current && (recRef.current._novaFinal = finalText);
+      }
+    };
+    rec.onerror = (e) => {
+      const msg = voiceErrorMessage(e.error);
+      if (msg) setError(msg);
+      setListening(false);
+    };
+    rec.onend = () => {
+      // Pull the final transcript we accumulated during onresult and
+      // hand it to the caller. If the session ended with no speech
+      // detected, onerror will have already fired and we skip the call.
+      const ft = (rec._novaFinal || '').trim();
+      setListening(false);
+      setInterim('');
+      recRef.current = null;
+      if (ft && onFinalRef.current) onFinalRef.current(ft);
+    };
+
+    try {
+      rec.start();
+      recRef.current = rec;
+      setListening(true);
+      return true;
+    } catch (err) {
+      setError(voiceErrorMessage(err && err.message) || 'Voice failed to start');
+      setListening(false);
+      recRef.current = null;
+      return false;
+    }
+  };
+
+  const stop = () => {
+    const rec = recRef.current;
+    if (!rec) return;
+    try { rec.stop(); } catch {}
+    // onend will run and reset state.
+  };
+
+  return { supported: VOICE_SUPPORTED, listening, interim, error, start, stop };
+}
+
+/* <MicButton> — small wrapper that toggles voice input and glows when
+   listening. Designed to drop into both the desktop and mobile command
+   bars. The optional `variant` prop is `'desktop' | 'mobile'` and just
+   changes the dimensions. */
+function MicButton({ voice, size = 34, variant = 'desktop' }) {
+  const { supported, listening, error, start, stop } = voice;
+  const color = listening ? '#fff1d4' : error ? '#ff6a4a' : ORANGE;
+  const ringColor = error ? 'rgba(255,106,74,0.45)' : ORANGE;
+  return (
+    <button
+      type="button"
+      className={`nova-mic ${listening ? 'is-listening' : ''} ${error ? 'is-error' : ''}`}
+      onClick={() => (listening ? stop() : start())}
+      title={
+        !supported
+          ? 'Voice not supported on this browser'
+          : listening
+            ? 'Stop listening'
+            : error
+              ? error
+              : 'Voice input'
+      }
+      aria-label={listening ? 'Stop listening' : 'Start voice input'}
+      aria-pressed={listening}
+      style={{
+        width: size, height: size,
+        background: listening
+          ? `radial-gradient(circle at center, ${ORANGE} 0%, rgba(255,154,38,0.45) 55%, rgba(255,154,38,0.05) 100%)`
+          : error
+            ? 'linear-gradient(160deg, rgba(255,106,74,0.18), rgba(255,106,74,0.04))'
+            : 'transparent',
+        border: `1px solid ${listening ? ORANGE : ringColor}`,
+        color,
+        cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 4,
+        position: 'relative',
+        boxShadow: listening
+          ? `0 0 14px rgba(255,154,38,0.55), inset 0 0 8px rgba(255,154,38,0.45)`
+          : error
+            ? '0 0 6px rgba(255,106,74,0.30)'
+            : 'none',
+        animation: listening ? 'novaMicPulse 1.1s ease-in-out infinite' : 'none',
+        transition: 'background 200ms, color 200ms, box-shadow 200ms',
+        flex: 'none',
+        padding: 0,
+      }}
+    >
+      <Mic size={variant === 'mobile' ? 17 : 15} strokeWidth={1.8} />
+    </button>
+  );
+}
+
 /* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
 function NOVAOutputModal({ output, agent, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
   if (!output) return null;
+
+  // Render text with light formatting: code blocks (```...```) become styled blocks;
+  // blank lines become paragraph breaks. Everything else preserves newlines.
+  const renderFormatted = (text) => {
+    if (!text) return null;
+    const segments = [];
+    const re = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let m;
+    let key = 0;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > lastIndex) {
+        segments.push({ type: 'text', value: text.slice(lastIndex, m.index) });
+      }
+      segments.push({ type: 'code', lang: m[1] || '', value: m[2] });
+      lastIndex = m.index + m[0].length;
+    }
+    if (lastIndex < text.length) segments.push({ type: 'text', value: text.slice(lastIndex) });
+
+    return segments.map((seg, i) => {
+      if (seg.type === 'code') {
+        return (
+          <pre key={i} style={{
+            background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,154,38,0.25)',
+            borderRadius: '4px', padding: '10px 12px', margin: '8px 0',
+            fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
+            color: '#ffd9a8', overflowX: 'auto', whiteSpace: 'pre',
+          }}>{seg.value}</pre>
+        );
+      }
+      // text segment — convert blank-line groups to paragraph breaks
+      const paras = seg.value.split(/\n{2,}/);
+      return paras.map((p, j) => (
+        <p key={`${i}-${j}`} style={{ margin: '0 0 8px 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {p.split('\n').map((line, k, arr) => (
+            <React.Fragment key={k}>
+              {line}
+              {k < arr.length - 1 && <br />}
+            </React.Fragment>
+          ))}
+        </p>
+      ));
+    });
+  };
+
+  const copy = async () => {
+    const ok = await copyToClipboard(output);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+  const copyAll = async () => {
+    const ok = await copyToClipboard(output);
+    if (ok) {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    }
+  };
+
+  const seoMode = isSeoResponse(agent, output);
+  // Weekly report mode triggers if the response actually parses into a
+  // weekly report shape. We don't gate on the prompt keywords because the
+  // agent name (e.g. "ANALYTICS") is too narrow a signal.
+  const weeklyMode = parseWeeklyReport(output) !== null;
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 999,
@@ -95,18 +1560,28 @@ function NOVAOutputModal({ output, agent, onClose }) {
         background: 'linear-gradient(160deg, #1a0e03, #0a0500)',
         border: '1px solid rgba(255,154,38,0.4)',
         borderRadius: '8px', padding: '20px',
-        width: '100%', maxWidth: '640px',
+        width: '100%', maxWidth: '680px',
         maxHeight: '80vh', overflow: 'auto',
         boxShadow: '0 0 40px rgba(255,130,10,0.2)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '10px', color: '#ff9a26', letterSpacing: '2px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 2 }}>
             ⚡ {agent} — OUTPUT
+            {weeklyMode && <span style={{ color: '#ff9a26', marginLeft: 6 }}>· MONDAY BRIEFING</span>}
+            {!weeklyMode && seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO STRUCTURED</span>}
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>CLOSE</button>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={copyAll} style={{ ...btnStyle, color: copiedAll ? '#35e08a' : ORANGE }} title="Copy full response">
+              {copiedAll ? '✓ COPIED ALL' : '⎘ COPY ALL'}
+            </button>
+            <button onClick={copy} style={{ ...btnStyle, color: copied ? '#35e08a' : ORANGE }}>
+              {copied ? 'COPIED' : 'COPY'}
+            </button>
+            <button onClick={onClose} style={btnStyle}>CLOSE</button>
+          </div>
         </div>
-        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#e8c98a', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {output}
+        <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
+          {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderFormatted(output)}
         </div>
       </div>
     </div>
@@ -651,18 +2126,19 @@ function PanelTitle({ title, action }) {
 }
 
 function FeedPanel() {
+  const items = useNovaActivity();
   return (
     <Chamfer x={1108} y={70} w={450} h={278} c={10}>
       <PanelTitle title="LIVE ACTIVITY FEED" action="VIEW ALL" />
-      {FEED.map((f, i) => (
-        <div key={i} className="feedrow" style={{ top: 34 + i * 37.5 }}>
+      {items.map((f, i) => (
+        <div key={`${f.t}-${f.name}-${i}`} className="feedrow" style={{ top: 34 + i * 37.5 }}>
           <span className="ft">{f.t}</span>
           <span className="fi"><ChamferFrame size={24} c={5}><Ic name={f.icon} size={11} /></ChamferFrame></span>
           <div>
             <div className="fn">{f.name}</div>
             <div className="fx">{f.text}</div>
           </div>
-          <span className="ok">SUCCESS</span>
+          <span className="ok" style={{ color: f.status === 'PROCESSING' ? '#ffb443' : undefined, textShadow: f.status === 'PROCESSING' ? '0 0 7px rgba(255,180,67,.4)' : undefined }}>{f.status || 'SUCCESS'}</span>
         </div>
       ))}
     </Chamfer>
@@ -861,6 +2337,15 @@ function WorldMapPanel() {
 }
 
 function ConsolePanel() {
+  const items = useNovaConsole();
+  const bodyRef = useRef(null);
+  // Auto-scroll to the bottom whenever new lines arrive. The blinking prompt
+  // sits at the end of the scrollable area, so it always stays visible.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [items]);
   return (
     <Chamfer x={1108} y={750} w={450} h={198} c={10}>
       <PanelTitle title="COMMAND CONSOLE" />
@@ -868,9 +2353,9 @@ function ConsolePanel() {
         <ChamferFrame size={15} c={3}><Zap size={8} /></ChamferFrame>
         <ChamferFrame size={15} c={3}><X size={8} /></ChamferFrame>
       </div>
-      <div className="consolebody">
-        {CONSOLE_LINES.map((l, i) => (
-          <div key={i} className="cline">
+      <div className="consolebody" ref={bodyRef}>
+        {items.map((l) => (
+          <div key={l.id} className="cline">
             <span className="ct">{l.t}</span>
             <span className="cg" style={{ color: l.color }}>[{l.tag}]</span>
             <span className="cx" style={l.tag === 'MISSION' ? { color: '#9fe8c4' } : undefined}>{l.text}</span>
@@ -889,18 +2374,76 @@ function CommandBar() {
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+
+  /* Voice input. While a recognition session is live, `interim` is
+     pushed into `cmd` in real time so the user sees their words appear
+     in the input. When the session ends cleanly, the final transcript
+     stays in the input and we auto-execute. */
+  const voice = useVoiceInput({
+    onFinal: (text) => {
+      setCmd(text);
+      // Defer one frame so the final transcript is committed to state
+      // before exec() reads it.
+      requestAnimationFrame(() => exec());
+    },
+  });
+  useEffect(() => {
+    // While listening, show interim transcript in the input. When the
+    // session ends, do NOT clear the input — the `onFinal` callback
+    // already wrote the final transcript there, and any subsequent
+    // typing by the user should be preserved.
+    if (voice.listening) {
+      setCmd(voice.interim);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.interim, voice.listening]);
+
   const exec = async () => {
     if (!cmd.trim() || thinking) return;
+    // Stop any active voice session so the listening UI doesn't linger
+    // while a command is in flight.
+    if (voice.listening) voice.stop();
     const userCmd = cmd.trim();
     const det = detectAgent(userCmd);
     setAgent(det); setCmd(''); setFlash(true);
     setTimeout(() => setFlash(false), 480);
     setThinking(true);
-    try {
-      const reply = await sendToNOVA(userCmd);
+    // push a PROCESSING entry to the live activity feed
+    pushActivity({
+      t: nowStamp(),
+      name: det,
+      icon: agentIconFor(det),
+      text: `↳ ${summarizeCmd(userCmd)}`,
+      status: 'PROCESSING',
+    });
+    // Stream the sequenced SYSTEM/ROUTER/AGENT/NOVA/UPLINK log lines into
+    // the Command Console panel while the API call runs.
+    const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
+    if (ok) {
       setOutput(reply);
-    } catch { setOutput('Connection interrupted. Retry.'); }
-    finally { setThinking(false); }
+      // follow-up entry with the result summary
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: `✓ ${summarizeCmd(reply, 70)}`,
+        status: 'SUCCESS',
+      });
+      // Persist to the localStorage-backed history ring so the user
+      // can review the conversation and NOVA has it on next session.
+      pushHistoryEntry(userCmd, det, reply);
+    } else {
+      setOutput(reply);
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: '✗ Connection interrupted. Retry.',
+        status: 'FAILED',
+      });
+      pushHistoryEntry(userCmd, det, reply);
+    }
+    setThinking(false);
   };
   return (
     <>
@@ -918,18 +2461,25 @@ function CommandBar() {
             <span key={i} style={{ width: 5, height: 5, background: c, boxShadow: `0 0 6px ${c}`, opacity: .9 }} />
           ))}
         </div>
-        <div style={{ position: 'absolute', right: 246, top: 8, fontFamily: 'var(--fm)', fontSize: 7, color: 'var(--tx-faint)', letterSpacing: 1.5 }}>
-          UPLINK SECURE
+        <div style={{ position: 'absolute', right: 246, top: 8, fontFamily: 'var(--fm)', fontSize: 7, color: 'var(--tx-faint)', letterSpacing: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {voice.listening ? (
+            <span className="nova-listening-pill"><span className="dot" />LISTENING…</span>
+          ) : voice.error ? (
+            <span className="nova-voice-error" title={voice.error}>{voice.error}</span>
+          ) : (
+            <span>UPLINK SECURE</span>
+          )}
         </div>
         <input className="cmdinput" style={{ left: 24, top: 13, width: 428, height: 34 }}
-          placeholder="ENTER COMMAND..." value={cmd}
+          placeholder={voice.listening ? 'SPEAK NOW…' : 'ENTER COMMAND...'}
+          value={cmd}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && exec()} />
         <Chamfer x={468} y={12} w={34} h={34} c={6}>
-          <button className="sqbtn" title="Voice input"><Mic size={15} /></button>
+          <MicButton voice={voice} size={28} variant="desktop" />
         </Chamfer>
         <button className="execbtn" style={{ left: 512, top: 9, width: 186, height: 40, clipPath: cutPoly(8) }}
-          onClick={exec}>EXECUTE</button>
+          onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
         <Brackets />
       </div>
 
@@ -938,6 +2488,63 @@ function CommandBar() {
           <button className="sqbtn" style={{ fontFamily: 'var(--fm)', fontSize: 8.5, letterSpacing: 1, color: 'var(--tx-dim)' }}>{c}</button>
         </Chamfer>
       ))}
+
+      {/* ── Quick-prompt chips: sit just below the input bar and fill the
+           command input with a pre-written prompt when clicked.          */}
+      <div
+        className="quick-chip-row"
+        style={{
+          position: 'absolute', left: 6, top: 1022, width: 1556, height: 32,
+          display: 'flex', alignItems: 'center', gap: 8,
+          overflowX: 'auto', overflowY: 'hidden',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+          paddingLeft: 6,
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--fm)', fontSize: 8, color: '#7a5a36',
+          letterSpacing: 1.4, paddingRight: 4, flex: 'none',
+        }}>QUICK ▸</span>
+        {QUICK_PROMPTS.map((q) => (
+          <button
+            key={q.id}
+            type="button"
+            title={q.prompt}
+            onClick={() => { setCmd(q.prompt); setFlash(true); setTimeout(() => setFlash(false), 380); }}
+            className="quick-chip"
+            style={{
+              flex: 'none',
+              height: 26, padding: '0 12px',
+              background: 'linear-gradient(180deg, rgba(255,154,38,0.12), rgba(255,154,38,0.04))',
+              border: '1px solid rgba(255,154,38,0.4)',
+              color: '#ffb443',
+              fontFamily: 'var(--fm)', fontSize: 9.5, letterSpacing: 1.4, fontWeight: 700,
+              borderRadius: 3, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              boxShadow: '0 0 6px rgba(255,154,38,0.18), inset 0 0 0 1px rgba(255,154,38,0.08)',
+              transition: 'background 120ms, box-shadow 120ms, color 120ms, transform 80ms',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.28), rgba(255,154,38,0.10))';
+              e.currentTarget.style.color = '#fff1d4';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(255,154,38,0.45), inset 0 0 0 1px rgba(255,154,38,0.18)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.12), rgba(255,154,38,0.04))';
+              e.currentTarget.style.color = '#ffb443';
+              e.currentTarget.style.boxShadow = '0 0 6px rgba(255,154,38,0.18), inset 0 0 0 1px rgba(255,154,38,0.08)';
+            }}
+            onMouseDown={(e) => { e.currentTarget.style.transform = 'translateY(1px)'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
+          >
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#ff9a26', boxShadow: '0 0 5px #ff9a26' }} />
+            {q.label}
+          </button>
+        ))}
+      </div>
+
       {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </>
   );
@@ -947,11 +2554,14 @@ function CommandBar() {
 function DesktopNOVA() {
   const vpRef = useRef(null);
   const [activeNav, setActiveNav] = useState('dashboard');
+  // When the user picks a history entry from the Data Vault view, we
+  // store it here so we can open the response in a NOVAOutputModal.
+  const [historyEntry, setHistoryEntry] = useState(null);
 
   useEffect(() => {
     const el = vpRef.current;
     const set = () => {
-      const s = Math.min(window.innerWidth / 1564, window.innerHeight / 1036);
+      const s = Math.min(window.innerWidth / 1564, window.innerHeight / 1056);
       el.style.setProperty('--s', s);
     };
     set();
@@ -959,13 +2569,20 @@ function DesktopNOVA() {
     return () => window.removeEventListener('resize', set);
   }, []);
 
+  // Tapping the same nav item again closes the vault overlay (a tiny
+  // UX nicety so the user doesn't get stuck).
+  const handleNav = (id) => {
+    setActiveNav((prev) => (prev === id && id === 'vault' ? 'dashboard' : id));
+    if (id !== 'vault') setHistoryEntry(null);
+  };
+
   return (
     <div className="viewport" ref={vpRef}>
       <div className="design">
         <div className="backdrop grid" />
         <div className="backdrop vignette" />
         <TopBar />
-        <LeftRail activeNav={activeNav} setActiveNav={setActiveNav} />
+        <LeftRail activeNav={activeNav} setActiveNav={handleNav} />
         <Stage />
         <FeedPanel />
         <ApisPanel />
@@ -977,6 +2594,20 @@ function DesktopNOVA() {
         <CommandBar />
         <div className="backdrop scan" />
       </div>
+      {activeNav === 'vault' && (
+        <HistoryOverlay
+          onOpen={(e) => setHistoryEntry(e)}
+          onClose={() => setActiveNav('dashboard')}
+          label="DATA VAULT"
+        />
+      )}
+      {historyEntry && (
+        <NOVAOutputModal
+          output={historyEntry.response}
+          agent={historyEntry.agent}
+          onClose={() => setHistoryEntry(null)}
+        />
+      )}
     </div>
   );
 }
@@ -990,6 +2621,7 @@ const MOBILE_NAV = [
   { id: 'team', target: 'mobile-team', icon: 'users', label: 'AI TEAM' },
   { id: 'projects', target: 'mobile-projects', icon: 'clipboard-list', label: 'PROJECTS' },
   { id: 'tasks', target: 'mobile-tasks', icon: 'list-todo', label: 'TASKS' },
+  { id: 'history', target: 'history', icon: 'history', label: 'HISTORY' },
   { id: 'more', target: 'mobile-apis', icon: 'settings', label: 'MORE' },
 ];
 
@@ -1369,16 +3001,17 @@ function MobileApis({ expanded, onToggle }) {
 }
 
 function MobileFeed() {
+  const items = useNovaActivity();
   return (
     <MobilePanel className="mobile-feed" c={12}>
       <MobileSectionHeader title="LIVE ACTIVITY FEED" action="SCROLL" />
       <div className="mobile-feed-list">
-        {FEED.map((f, i) => (
-          <div key={`${f.t}-${i}`} className="mobile-feed-row">
+        {items.map((f, i) => (
+          <div key={`${f.t}-${f.name}-${i}`} className="mobile-feed-row">
             <span className="mobile-feed-time">{f.t}</span>
             <span className="mobile-feed-node"><Ic name={f.icon} size={12} /></span>
             <span className="mobile-feed-copy"><b>{f.name}</b><small>{f.text}</small></span>
-            <span className="mobile-feed-ok">SUCCESS</span>
+            <span className="mobile-feed-ok" style={{ color: f.status === 'PROCESSING' ? '#ffb443' : f.status === 'FAILED' ? '#ff6a4a' : undefined }}>{f.status || 'SUCCESS'}</span>
           </div>
         ))}
       </div>
@@ -1457,28 +3090,126 @@ function MobileCommandConsole() {
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+
+  /* Voice input — same as desktop: show interim in real time, auto-exec
+     on session end. */
+  const voice = useVoiceInput({
+    onFinal: (text) => {
+      setCmd(text);
+      requestAnimationFrame(() => exec());
+    },
+  });
+  useEffect(() => {
+    if (voice.listening) setCmd(voice.interim);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.interim, voice.listening]);
+
   const exec = async () => {
     if (!cmd.trim() || thinking) return;
+    if (voice.listening) voice.stop();
     const userCmd = cmd.trim();
     const det = detectAgent(userCmd);
     setAgent(det); setCmd('');
     setExecuted(true); setThinking(true);
-    try {
-      const reply = await sendToNOVA(userCmd);
+    pushActivity({
+      t: nowStamp(),
+      name: det,
+      icon: agentIconFor(det),
+      text: `↳ ${summarizeCmd(userCmd)}`,
+      status: 'PROCESSING',
+    });
+    // Stream sequenced log lines into the shared console log bus (same one
+    // the desktop Command Console subscribes to).
+    const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
+    if (ok) {
       setOutput(reply);
-    } catch { setOutput('Connection interrupted. Retry.'); }
-    finally { setThinking(false); setTimeout(() => setExecuted(false), 1200); }
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: `✓ ${summarizeCmd(reply, 70)}`,
+        status: 'SUCCESS',
+      });
+      pushHistoryEntry(userCmd, det, reply);
+    } else {
+      setOutput(reply);
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: '✗ Connection interrupted. Retry.',
+        status: 'FAILED',
+      });
+      pushHistoryEntry(userCmd, det, reply);
+    }
+    setThinking(false);
+    setTimeout(() => setExecuted(false), 1200);
   };
   return (
     <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>
       <div className="mobile-console-status">
         <span><i />NOVA COMMAND LINK</span>
-        <small>{executed ? 'COMMAND ACCEPTED' : 'UPLINK SECURE'}</small>
+        <small>
+          {executed
+            ? 'COMMAND ACCEPTED'
+            : voice.listening
+              ? <span className="nova-listening-pill"><span className="dot" />LISTENING…</span>
+              : voice.error
+                ? <span style={{ color: '#ffb6a3' }}>{voice.error}</span>
+                : 'UPLINK SECURE'}
+        </small>
       </div>
       <div className="mobile-console-input-row">
-        <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && exec()} placeholder="ENTER COMMAND..." aria-label="Enter command" />
-        <button type="button" className="mobile-mic" title="Voice command"><Mic size={17} /></button>
-        <button type="button" className="mobile-execute" onClick={exec}>{thinking ? '...' : 'EXECUTE'}</button>
+        <input
+          value={cmd}
+          onChange={(e) => setCmd(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && exec()}
+          placeholder={voice.listening ? 'SPEAK NOW…' : 'ENTER COMMAND...'}
+          aria-label="Enter command"
+        />
+        <MicButton voice={voice} size={44} variant="mobile" />
+        <button type="button" className="mobile-execute" onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
+      </div>
+      <div
+        className="mobile-quick-chips"
+        style={{
+          marginTop: 8,
+          display: 'flex', alignItems: 'center', gap: 6,
+          overflowX: 'auto', overflowY: 'hidden',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+          paddingBottom: 2,
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--fm)', fontSize: 7.5, color: '#7a5a36',
+          letterSpacing: 1.4, paddingRight: 2, flex: 'none',
+        }}>QUICK ▸</span>
+        {QUICK_PROMPTS.map((q) => (
+          <button
+            key={q.id}
+            type="button"
+            title={q.prompt}
+            onClick={() => setCmd(q.prompt)}
+            style={{
+              flex: 'none',
+              height: 22, padding: '0 9px',
+              background: 'linear-gradient(180deg, rgba(255,154,38,0.14), rgba(255,154,38,0.04))',
+              border: '1px solid rgba(255,154,38,0.4)',
+              color: '#ffb443',
+              fontFamily: 'var(--fm)', fontSize: 8, letterSpacing: 1.2, fontWeight: 700,
+              borderRadius: 3, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              boxShadow: '0 0 5px rgba(255,154,38,0.16), inset 0 0 0 1px rgba(255,154,38,0.06)',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#fff1d4'; e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.28), rgba(255,154,38,0.10))'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#ffb443'; e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.14), rgba(255,154,38,0.04))'; }}
+          >
+            <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#ff9a26', boxShadow: '0 0 4px #ff9a26' }} />
+            {q.label}
+          </button>
+        ))}
       </div>
       {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </div>
@@ -1504,10 +3235,17 @@ function MobileNOVA() {
   const [expandedProject, setExpandedProject] = useState(null);
   const [expandedApi, setExpandedApi] = useState(null);
   const [commanderOpen, setCommanderOpen] = useState(false);
+  // History view: set to a history entry when the user taps a row in
+  // the HistoryView, so we can pop NOVAOutputModal with the response.
+  const [historyEntry, setHistoryEntry] = useState(null);
 
   const go = (nav) => {
     setActiveNav(nav.id);
-    document.getElementById(nav.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // The 'history' tab opens an overlay panel instead of scrolling
+    // to a section, so it intentionally has no `target` element.
+    if (nav.target && nav.target !== 'history') {
+      document.getElementById(nav.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   return (
@@ -1529,8 +3267,377 @@ function MobileNOVA() {
         <MobileWorldMap />
       </main>
       <MobileCommandConsole />
+      <MobileWeeklyFab />
       <MobileBottomNav active={activeNav} onNav={go} />
       <MobileAgentModal agent={activeAgent} onClose={() => setActiveAgent(null)} />
+      {activeNav === 'history' && (
+        <HistoryOverlay
+          onOpen={(e) => setHistoryEntry(e)}
+          onClose={() => setActiveNav('home')}
+          label="COMMAND HISTORY"
+        />
+      )}
+      {historyEntry && (
+        <NOVAOutputModal
+          output={historyEntry.response}
+          agent={historyEntry.agent}
+          onClose={() => setHistoryEntry(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════ MOBILE WEEKLY REPORT FAB ═══════════════ */
+// One-tap floating action button that fires the Monday morning briefing
+// and opens the same NOVAOutputModal the desktop console uses. The FAB
+// sits above the mobile command console on the right edge so it never
+// fights with the input field.
+function MobileWeeklyFab() {
+  const [thinking, setThinking] = useState(false);
+  const [pulse, setPulse] = useState(true);
+  const [output, setOutput] = useState(null);
+  const [agent, setAgent] = useState('NOVA');
+
+  // Soft attention pulse stops once the user has triggered it once so
+  // the FAB doesn't keep nagging. Re-enables on a fresh page load.
+  useEffect(() => {
+    const t = setTimeout(() => setPulse(false), 12000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const trigger = async () => {
+    if (thinking) return;
+    const userCmd = 'weekly report';
+    const det = 'ANALYTICS';
+    setAgent(det);
+    setThinking(true);
+    pushActivity({
+      t: nowStamp(),
+      name: det,
+      icon: agentIconFor(det),
+      text: '↳ weekly report (FAB)',
+      status: 'PROCESSING',
+    });
+    const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
+    if (ok) {
+      setOutput(reply);
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: `✓ ${summarizeCmd(reply, 60)}`,
+        status: 'SUCCESS',
+      });
+      pushHistoryEntry(userCmd, det, reply);
+    } else {
+      setOutput(reply);
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: '✗ Connection interrupted. Retry.',
+        status: 'FAILED',
+      });
+      pushHistoryEntry(userCmd, det, reply);
+    }
+    setThinking(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="mobile-weekly-fab"
+        onClick={trigger}
+        disabled={thinking}
+        title={thinking ? 'Generating briefing…' : 'Run Monday morning briefing'}
+        style={{
+          position: 'fixed',
+          right: 14,
+          bottom: 218, // sits above the command console (which lives at bottom: 60–62px)
+          width: 58,
+          height: 58,
+          borderRadius: '50%',
+          background: thinking
+            ? 'linear-gradient(160deg, #2c1c0c, #1a0e03)'
+            : 'linear-gradient(160deg, #ff9a26 0%, #e8721a 55%, #b04a05 100%)',
+          border: '1px solid rgba(255,194,77,0.55)',
+          color: '#fff1d4',
+          cursor: thinking ? 'wait' : 'pointer',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 1,
+          fontFamily: 'Orbitron, monospace',
+          fontWeight: 700,
+          letterSpacing: 0.5,
+          zIndex: 70,
+          boxShadow: thinking
+            ? '0 0 10px rgba(255,154,38,0.20), inset 0 0 8px rgba(0,0,0,0.5)'
+            : '0 0 22px rgba(255,154,38,0.55), 0 0 6px rgba(255,194,77,0.85), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -2px 6px rgba(0,0,0,0.25)',
+          animation: pulse && !thinking ? 'novaFabPulse 2.4s ease-in-out infinite' : 'none',
+          transition: 'transform 100ms, background 200ms, box-shadow 200ms',
+        }}
+        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.95)'; }}
+        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.95)'; }}
+        onTouchEnd={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+      >
+        {thinking ? (
+          <>
+            <FileText size={20} strokeWidth={1.8} color="#ffb443" />
+            <span style={{ fontSize: 7, letterSpacing: 1.4, color: '#ffb443', marginTop: 1 }}>SYNC…</span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 20, lineHeight: 1 }}>📋</span>
+            <span style={{ fontSize: 7, letterSpacing: 1.4, marginTop: 1 }}>WEEKLY</span>
+          </>
+        )}
+      </button>
+      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
+      <style>{`
+        @keyframes novaFabPulse {
+          0%, 100% { box-shadow: 0 0 22px rgba(255,154,38,0.55), 0 0 6px rgba(255,194,77,0.85), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -2px 6px rgba(0,0,0,0.25); }
+          50%      { box-shadow: 0 0 30px rgba(255,154,38,0.85), 0 0 12px rgba(255,194,77,1.0), inset 0 1px 0 rgba(255,255,255,0.40), inset 0 -2px 6px rgba(0,0,0,0.25); }
+        }
+      `}</style>
+    </>
+  );
+}
+
+/* ═══════════════ HISTORY VIEW ═══════════════ */
+// Lists past commands + responses grouped by date (Today / Yesterday /
+// Earlier). Tapping an entry opens the full response in the standard
+// NOVAOutputModal so the same SEO / Weekly / plain renderers apply.
+// A CLEAR HISTORY button at the top wipes both the in-memory ring and
+// the localStorage copy.
+function dayBucket(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = startOfDay(now) - startOfDay(d);
+  if (diff <= 0) return 'Today';
+  if (diff <= 86400000) return 'Yesterday';
+  return 'Earlier';
+}
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function formatDateLabel(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/* Shared row — used by both the desktop and mobile variants. The
+   onClick handler is supplied by the parent (typically opens the
+   response in a NOVAOutputModal). */
+function HistoryRow({ entry, onOpen }) {
+  const preview = (entry.response || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(entry)}
+      className="history-row"
+      style={{
+        display: 'block', width: '100%', textAlign: 'left',
+        background: 'linear-gradient(180deg, rgba(255,154,38,0.06), rgba(255,154,38,0.02))',
+        border: '1px solid rgba(255,154,38,0.22)',
+        borderRadius: 4,
+        padding: '10px 12px',
+        marginBottom: 6,
+        cursor: 'pointer',
+        color: '#e8c98a',
+        fontFamily: 'var(--fb), system-ui, sans-serif',
+        transition: 'background 150ms, border-color 150ms, transform 80ms',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.14), rgba(255,154,38,0.04))';
+        e.currentTarget.style.borderColor = 'rgba(255,154,38,0.45)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.06), rgba(255,154,38,0.02))';
+        e.currentTarget.style.borderColor = 'rgba(255,154,38,0.22)';
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, rgba(255,154,38,0.18), rgba(16,9,3,0.6))', border: '1px solid rgba(255,154,38,0.40)', borderRadius: 4, color: ORANGE, flex: 'none' }}>
+          <Ic name={agentIconFor(entry.agent)} size={11} />
+        </span>
+        <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 1.4, color: ORANGE, fontWeight: 700 }}>{entry.agent}</span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Clock size={9} strokeWidth={1.8} /> {formatTime(entry.timestamp)}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: '#ffd9a8', fontWeight: 600, lineHeight: 1.35, wordBreak: 'break-word', marginBottom: 4 }}>
+        {entry.cmd}
+      </div>
+      <div style={{ fontSize: 10.5, color: '#9a7bff', lineHeight: 1.45, fontStyle: 'italic' }}>
+        ↳ {preview}{preview.length >= 100 ? '…' : ''}
+      </div>
+    </button>
+  );
+}
+
+function HistoryView({ onOpen, onClose, compact = false }) {
+  const items = useNovaHistory();
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  // Group by day bucket, preserving the newest-first ordering from the
+  // store. We walk backwards so the most recent entry ends up on top.
+  const groups = {};
+  const order = [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const bucket = dayBucket(items[i].timestamp);
+    if (!groups[bucket]) { groups[bucket] = []; order.push(bucket); }
+    groups[bucket].push(items[i]);
+  }
+
+  const handleClear = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      // Auto-cancel the confirm state after 4s so it doesn't stick.
+      setTimeout(() => setConfirmClear(false), 4000);
+      return;
+    }
+    clearHistory();
+    setConfirmClear(false);
+  };
+
+  return (
+    <div className="history-view" style={{
+      display: 'flex', flexDirection: 'column',
+      height: compact ? '100%' : 'auto',
+      minHeight: compact ? 0 : 360,
+      color: '#e8c98a',
+      fontFamily: 'var(--fb), system-ui, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 12, gap: 10, flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <History size={16} color={ORANGE} strokeWidth={1.8} />
+          <div>
+            <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 11, color: ORANGE, letterSpacing: 2.4, fontWeight: 700 }}>COMMAND HISTORY</div>
+            <div style={{ fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1.4, marginTop: 2 }}>
+              {items.length} of {MAX_HISTORY} entries · localStorage-backed
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={items.length === 0}
+            className={confirmClear ? 'is-confirming' : ''}
+            style={{
+              background: confirmClear
+                ? 'linear-gradient(180deg, rgba(255,106,74,0.30), rgba(255,106,74,0.10))'
+                : 'linear-gradient(180deg, rgba(255,154,38,0.12), rgba(255,154,38,0.04))',
+              border: `1px solid ${confirmClear ? 'rgba(255,106,74,0.6)' : 'rgba(255,154,38,0.40)'}`,
+              color: confirmClear ? '#ffb6a3' : ORANGE,
+              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: items.length === 0 ? 0.4 : 1,
+              padding: '6px 12px',
+              fontSize: 9, letterSpacing: 1.6, fontFamily: 'Orbitron, monospace',
+              fontWeight: 700, borderRadius: 3,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+            title={confirmClear ? 'Tap again to confirm' : 'Erase all stored history'}
+          >
+            <Trash2 size={11} strokeWidth={1.8} />
+            {confirmClear ? 'CONFIRM CLEAR' : 'CLEAR HISTORY'}
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ background: 'none', border: '1px solid rgba(255,154,38,0.30)', color: ORANGE, cursor: 'pointer', padding: '6px 10px', fontSize: 9, letterSpacing: 1.6, fontFamily: 'Orbitron, monospace', borderRadius: 3 }}
+            >
+              CLOSE
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="history-body" style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+        paddingRight: 4,
+      }}>
+        {items.length === 0 ? (
+          <div style={{
+            border: '1px dashed rgba(255,154,38,0.30)',
+            borderRadius: 4,
+            padding: '36px 16px',
+            textAlign: 'center',
+            color: '#7a5a36',
+          }}>
+            <History size={32} color="#5c452c" strokeWidth={1.2} style={{ marginBottom: 10 }} />
+            <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, letterSpacing: 1.6, marginBottom: 4 }}>NO HISTORY YET</div>
+            <div style={{ fontSize: 11, lineHeight: 1.5 }}>Send your first command to NOVA — it will appear here, and persist across sessions.</div>
+          </div>
+        ) : (
+          order.map((bucket) => (
+            <section key={bucket} style={{ marginBottom: 14 }}>
+              <div style={{
+                fontFamily: 'Orbitron, monospace', fontSize: 9, color: '#cfa875',
+                letterSpacing: 2, marginBottom: 6, paddingBottom: 4,
+                borderBottom: '1px solid rgba(255,154,38,0.16)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+              }}>
+                <span>{bucket.toUpperCase()}</span>
+                <span style={{ fontSize: 8, color: '#5c452c', letterSpacing: 1.4 }}>
+                  {groups[bucket].length} {groups[bucket].length === 1 ? 'entry' : 'entries'}
+                </span>
+              </div>
+              {groups[bucket].map((e) => (
+                <HistoryRow key={e.timestamp} entry={e} onOpen={onOpen} />
+              ))}
+            </section>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Full-screen overlay shell — used by both desktop and mobile variants
+   so the History view can sit on top of whatever is currently
+   showing. Tapping the backdrop closes. */
+function HistoryOverlay({ onOpen, onClose, label = 'COMMAND HISTORY' }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 90,
+        background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 720, maxHeight: '85vh',
+        background: 'linear-gradient(160deg, #1a0e03, #0a0500)',
+        border: '1px solid rgba(255,154,38,0.45)',
+        borderRadius: 8, padding: 20,
+        boxShadow: '0 0 40px rgba(255,130,10,0.25)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <HistoryView onOpen={onOpen} onClose={onClose} compact />
+      </div>
     </div>
   );
 }
