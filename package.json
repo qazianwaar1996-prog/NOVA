@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && touch dist/.nojekyll",
     "preview": "vite preview",
-    "deploy": "gh-pages -d dist"
+    "deploy": "npm run build && gh-pages -d dist"
   },
   "dependencies": {
     "@fontsource/orbitron": "^5.3.0",
