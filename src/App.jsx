@@ -4,7 +4,7 @@ import {
   Settings, Network, Activity, Bell, Atom, Power, ChevronRight, CodeXml, Bug, Box,
   Infinity as InfinityIcon, ShieldCheck, PenLine, PenTool, ClipboardCheck, Target, Gauge,
   Mic, Crosshair, TriangleAlert, CircleX, Aperture, Globe, Rocket, Search, FileText,
-  X, Zap, Check, Asterisk, Send,
+  X, Zap, Check, Asterisk, Send, Download, Sparkles,
 } from 'lucide-react';
 import { MAP_DOTS } from './dots.js';
 import {
@@ -63,15 +63,65 @@ function detectAgent(t) {
 // Global message history for context
 const novaHistory = [];
 
+/* ═══════════════ WEEKLY REPORT INJECTION ═══════════════ */
+// Heuristic: does this command look like a weekly / Monday briefing ask?
+// Matches "weekly report", "monday morning briefing", "monday brief",
+// "week ahead", "state of the union", and a bare "report" (in the context
+// of a status / weekly ask — not e.g. "bug report").
+const WEEKLY_KEYWORDS = /\b(weekly\s*report|monday\s*(morning\s*)?brief(ing)?|week\s*ahead|week\s*brief|monday\s*brief|monday\s*memo|state\s*of\s*the\s*union)\b/i;
+const BARE_REPORT_RE = /^\s*(give\s+me\s+|run\s+|do\s+|start\s+|show\s+me\s+)?(the\s+)?(weekly\s+)?report\s*[\.!]?\s*$/i;
+
+function isWeeklyReport(text) {
+  if (!text) return false;
+  const t = String(text).toLowerCase().trim();
+  if (WEEKLY_KEYWORDS.test(t)) return true;
+  // Bare "report" — only when the message is short (otherwise "bug report",
+  // "write a report", etc. would false-positive).
+  if (t.length <= 40 && BARE_REPORT_RE.test(t)) return true;
+  return false;
+}
+
+/* Specialized system prompt for the weekly briefing. Asks the model to
+   produce a deterministic three-section format that the parser can
+   reliably slice into the cards the modal renders. The wording here is
+   deliberate so the section headers come out verbatim. */
+const WEEKLY_REPORT_PROMPT = `${SYSTEM_PROMPT}
+
+You are now drafting NOVA's Monday morning briefing for Anwaar. Keep the
+JARVIS tone — calm, precise, action-oriented — but format the response
+as a clean structured report. Use EXACTLY these section headers, in this
+order, each on its own line:
+
+SCHOLARICS WEEKLY:
+- SEO health assessment: 1 sentence, honest and specific
+- Top 3 content opportunities: numbered 1, 2, 3 — one short headline each
+- 3 keywords to target: comma-separated on one line
+- AdSense optimization tip: 1 sentence
+- Recommended blog post topic: 1 short headline + 1 sentence why
+
+ROOTED WEEKLY:
+- Launch readiness status: 1 sentence (e.g. "90% ready — blocked on X")
+- Top 3 content ideas for target market (USA / UK / Canada / Australia): numbered
+- Pinterest strategy tip: 1-2 sentences — Pinterest is the most important channel for parenting
+- SEO preparation checklist item: 1 concrete task for this week
+
+THIS WEEK PRIORITIES:
+- #1 most important action: 1 sentence, decisive
+- Biggest opportunity right now: 1 sentence
+- One thing to stop doing: 1 sentence
+
+End with: "Anything else on this, Anwaar?"`;
+
 async function sendToNOVA(userCmd) {
   novaHistory.push({ role: 'user', content: userCmd });
+  const useWeekly = isWeeklyReport(userCmd);
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
+      max_tokens: 1400,
+      system: useWeekly ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT,
       messages: novaHistory.slice(-10),
     }),
   });
@@ -356,6 +406,103 @@ function isSeoResponse(agent, text) {
   if (/SEO/i.test(agent || '')) return true;
   if (!text) return false;
   return /meta\s+title|og:title|json-?ld|schema\s+markup|quick\s+wins/i.test(text);
+}
+
+/* ═══════════════ WEEKLY REPORT PARSER ═══════════════ */
+// Splits a Monday-morning briefing into the three sections (Scholarics,
+// Rooted, Priorities) and pulls out the labelled sub-fields under each
+// one. The labels come from the specialized system prompt above.
+const WR_SECTION_RE = /^\s*(SCHOLARICS\s+WEEKLY|ROOTED\s+WEEKLY|THIS\s+WEEK\s+PRIORITIES)\s*:\s*$/i;
+const WR_LABEL_RE = /^\s*[-•]?\s*([^:\n]{2,60})\s*:\s*(.+?)\s*$/;
+// Items in lists inside a section (numbered or bulleted). Returns the
+// cleaned headline, or null if the line isn't a list item.
+const WR_LIST_RE = /^\s*(?:\d+[\.\)]\s*|[-*•]\s*)(.+?)\s*$/;
+// Lines like "3 keywords to target: foo, bar, baz" — a comma-separated
+// field rendered as inline chips.
+
+function parseWeeklyReport(text) {
+  if (!text) return null;
+  const lines = String(text).split(/\r?\n/);
+
+  // Slice into three buckets by section header.
+  const buckets = { scholarics: [], rooted: [], priorities: [] };
+  let current = null;
+  for (const line of lines) {
+    const m = line.trim().match(WR_SECTION_RE);
+    if (m) {
+      // The matched header is "SCHOLARICS WEEKLY", "ROOTED WEEKLY", or
+      // "THIS WEEK PRIORITIES". Normalize to a bucket key.
+      const header = m[1].toLowerCase();
+      if (header.startsWith('scholarics')) current = 'scholarics';
+      else if (header.startsWith('rooted')) current = 'rooted';
+      else current = 'priorities';
+      continue;
+    }
+    if (current && buckets[current]) buckets[current].push(line);
+  }
+
+  // Pull labelled key:value lines AND list items out of a bucket, in order.
+  const parseBucket = (rawLines) => {
+    const fields = []; // ordered list of { kind, label?, text? | items? }
+    for (const ln of rawLines) {
+      if (!ln.trim()) continue;
+      const lab = ln.match(WR_LABEL_RE);
+      if (lab) {
+        const label = lab[1].trim();
+        const value = lab[2].trim();
+        // Comma-separated field? Only treat it as a list of chips when the
+        // value is a single short line with 2+ commas AND the label hints
+        // at a list ("keywords", "ideas", "opportunities", "priorities").
+        const looksLikeList = /keyword|opportunit|idea|priorit|action/i.test(label);
+        if (looksLikeList && value.includes(',')) {
+          const items = value.split(',').map((s) => s.trim()).filter(Boolean);
+          if (items.length >= 2) {
+            fields.push({ kind: 'list', label, items });
+            continue;
+          }
+        }
+        fields.push({ kind: 'field', label, text: value });
+        continue;
+      }
+      const li = ln.match(WR_LIST_RE);
+      if (li) {
+        let item = li[1].trim();
+        // A list item that ends with ":" is a header for the items that
+        // follow, not an item itself. Promote it to a labelled numbered
+        // list so the rendering can use it as a section title.
+        if (item.endsWith(':')) {
+          fields.push({ kind: 'numbered', label: item.slice(0, -1).trim(), items: [] });
+          continue;
+        }
+        const last = fields[fields.length - 1];
+        if (last && last.kind === 'numbered') {
+          last.items.push(item);
+        } else {
+          fields.push({ kind: 'numbered', label: '', items: [item] });
+        }
+        continue;
+      }
+      // Free-floating sentence — attach to the previous field if it was
+      // a list/headline; otherwise stash as its own paragraph.
+      const last = fields[fields.length - 1];
+      if (last && (last.kind === 'numbered' || last.kind === 'list') && last.label === '') {
+        last.items[last.items.length - 1] += ' — ' + ln.trim();
+      } else {
+        fields.push({ kind: 'paragraph', text: ln.trim() });
+      }
+    }
+    return fields;
+  };
+
+  const out = {
+    scholarics: parseBucket(buckets.scholarics),
+    rooted: parseBucket(buckets.rooted),
+    priorities: parseBucket(buckets.priorities),
+  };
+
+  // Heuristic: did we find at least one labelled field in any section?
+  const totalFields = out.scholarics.length + out.rooted.length + out.priorities.length;
+  return totalFields > 0 ? out : null;
 }
 
 /* Inline pretty-print a JSON-LD string with a touch of syntax highlighting
@@ -730,6 +877,306 @@ function CopyableRow({ label, value, copied, onCopy }) {
   );
 }
 
+/* ═══════════════ WEEKLY REPORT MODAL ═══════════════ */
+// Renders the parsed Monday morning briefing as three color-coded cards
+// (Scholarics, Rooted, Priorities) with structured fields. Also offers
+// a DOWNLOAD .MD button so Anwaar can save the briefing for later.
+const WR_PALETTE = {
+  scholarics: { accent: ORANGE, glow: 'rgba(255,154,38,0.30)', soft: 'rgba(255,154,38,0.10)', icon: Search, tagline: 'STUDENT-FACING · ACADEMIC TOOLS' },
+  rooted:     { accent: '#35e08a', glow: 'rgba(53,224,138,0.30)', soft: 'rgba(53,224,138,0.10)', icon: Globe,  tagline: 'PARENTING · USA / UK / CA / AU' },
+  priorities: { accent: '#ff6a4a', glow: 'rgba(255,106,74,0.30)', soft: 'rgba(255,106,74,0.10)', icon: Rocket, tagline: 'THIS WEEK · DECISIVE MOVES' },
+};
+
+function WRCard({ title, kicker, fields, palette, copyField, copiedKey, idx }) {
+  const Icon = palette.icon;
+  return (
+    <section
+      style={{
+        position: 'relative',
+        margin: '14px 0 18px',
+        borderRadius: 6,
+        background: 'linear-gradient(160deg, rgba(20,10,4,0.85), rgba(8,4,1,0.92))',
+        border: `1px solid ${palette.glow}`,
+        boxShadow: `0 0 18px ${palette.soft}, inset 0 0 0 1px rgba(0,0,0,0.4)`,
+        overflow: 'hidden',
+      }}
+    >
+      {/* top accent bar */}
+      <div style={{ height: 2, background: `linear-gradient(90deg, transparent, ${palette.accent}, transparent)`, opacity: 0.85 }} />
+      {/* header */}
+      <header style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 14px 8px',
+        borderBottom: `1px solid ${palette.glow}`,
+        background: `linear-gradient(180deg, ${palette.soft}, transparent)`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span style={{
+            width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: `linear-gradient(160deg, ${palette.soft}, rgba(0,0,0,0.5))`,
+            border: `1px solid ${palette.glow}`,
+            borderRadius: 4, color: palette.accent,
+            boxShadow: `0 0 8px ${palette.soft}`,
+          }}><Icon size={14} strokeWidth={1.8} /></span>
+          <div>
+            <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 11, color: palette.accent, letterSpacing: 2.2, fontWeight: 700 }}>
+              {title}
+            </div>
+            <div style={{ fontFamily: 'var(--fm)', fontSize: 8, color: '#7a5a36', letterSpacing: 1.4, marginTop: 2 }}>
+              {kicker}
+            </div>
+          </div>
+        </div>
+        <div style={{
+          fontFamily: 'var(--fm)', fontSize: 8, color: '#5c452c',
+          letterSpacing: 1.6,
+        }}>CARD {String(idx).padStart(2, '0')}/03</div>
+      </header>
+      {/* body */}
+      <div style={{ padding: '12px 14px 14px' }}>
+        {fields.map((f, i) => {
+          if (f.kind === 'field') {
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={sectionLabel}>{f.label}</span>
+                  <button
+                    style={{ ...btnStyle, padding: '2px 8px', fontSize: 8.5 }}
+                    onClick={() => copyField(`${title}-${i}`, f.text)}
+                    title={`Copy "${f.label}"`}
+                  >{copiedKey === `${title}-${i}` ? '✓ COPIED' : '⎘ COPY'}</button>
+                </div>
+                <div style={{
+                  background: 'rgba(0,0,0,0.45)',
+                  border: '1px solid rgba(255,154,38,0.18)',
+                  borderLeft: `2px solid ${palette.accent}`,
+                  borderRadius: 3,
+                  padding: '8px 10px',
+                  color: '#ffd9a8',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  fontFamily: 'var(--fb), system-ui, sans-serif',
+                }}>{f.text}</div>
+              </div>
+            );
+          }
+          if (f.kind === 'list') {
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <span style={sectionLabel}>{f.label}</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {f.items.map((it, j) => (
+                    <span
+                      key={j}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        padding: '4px 10px',
+                        background: palette.soft,
+                        border: `1px solid ${palette.glow}`,
+                        color: palette.accent,
+                        borderRadius: 999,
+                        fontFamily: 'var(--fm)', fontSize: 10.5, letterSpacing: 0.4,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: palette.accent, boxShadow: `0 0 5px ${palette.accent}` }} />
+                      {it}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          if (f.kind === 'numbered') {
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                {f.label && <span style={sectionLabel}>{f.label}</span>}
+                <ol style={{ listStyle: 'none', padding: 0, margin: f.label ? '4px 0 0' : 0 }}>
+                  {f.items.map((it, j) => (
+                    <li
+                      key={j}
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 9,
+                        padding: '6px 0',
+                        borderTop: j === 0 ? 'none' : `1px dashed ${palette.soft}`,
+                      }}
+                    >
+                      <span style={{
+                        flex: 'none',
+                        width: 22, height: 22, marginTop: 1,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: `linear-gradient(160deg, ${palette.soft}, rgba(0,0,0,0.5))`,
+                        border: `1px solid ${palette.glow}`,
+                        borderRadius: 3,
+                        color: palette.accent, fontFamily: 'var(--fm)',
+                        fontSize: 10, fontWeight: 700,
+                      }}>{String(j + 1).padStart(2, '0')}</span>
+                      <span style={{ flex: 1, color: '#ffd9a8', fontSize: 12, lineHeight: 1.5 }}>{it}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            );
+          }
+          // paragraph
+          return <p key={i} style={{ margin: '0 0 8px', color: '#cfa875', fontSize: 12, lineHeight: 1.5 }}>{f.text}</p>;
+        })}
+        {fields.length === 0 && (
+          <div style={{ color: '#7a5a36', fontSize: 11, fontStyle: 'italic', textAlign: 'center', padding: '8px 0' }}>
+            No data for this section in the response.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* Convert a parsed report back into a clean markdown document so the
+   DOWNLOAD .MD button produces a useful artifact. */
+function weeklyReportToMarkdown(parsed) {
+  const sectionTitles = {
+    scholarics: 'SCHOLARICS WEEKLY',
+    rooted: 'ROOTED WEEKLY',
+    priorities: 'THIS WEEK PRIORITIES',
+  };
+  const tags = {
+    scholarics: '📚 scholarics.com — student-facing academic tools',
+    rooted: '🌱 rooted — parenting platform, USA / UK / CA / AU',
+    priorities: '🎯 decisive actions for the week',
+  };
+  const stamp = new Date().toISOString().slice(0, 10);
+  const lines = [];
+  lines.push(`# NOVA Monday Morning Briefing — ${stamp}`);
+  lines.push('');
+  lines.push('_Prepared by NOVA, the AI chief of staff._');
+  lines.push('');
+  for (const key of ['scholarics', 'rooted', 'priorities']) {
+    const fields = parsed[key] || [];
+    if (fields.length === 0) continue;
+    lines.push(`## ${sectionTitles[key]}`);
+    lines.push(`_${tags[key]}_`);
+    lines.push('');
+    for (const f of fields) {
+      if (f.kind === 'field') {
+        lines.push(`**${f.label}** — ${f.text}`);
+      } else if (f.kind === 'list') {
+        lines.push(`**${f.label}** — ${f.items.join(', ')}`);
+      } else if (f.kind === 'numbered') {
+        if (f.label) lines.push(`**${f.label}**`);
+        f.items.forEach((it, i) => lines.push(`${i + 1}. ${it}`));
+      } else {
+        lines.push(f.text);
+      }
+      lines.push('');
+    }
+  }
+  lines.push('---');
+  lines.push('_Anything else on this, Anwaar?_');
+  return lines.join('\n');
+}
+
+function WeeklyReportModalBody({ output }) {
+  const parsed = useMemo(() => parseWeeklyReport(output), [output]);
+  const [copiedKey, setCopiedKey] = useState(null);
+  const [downloaded, setDownloaded] = useState(false);
+
+  if (!parsed) {
+    return <pre style={codePanelStyle}>{output}</pre>;
+  }
+
+  const copyField = async (key, text) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1400);
+    }
+  };
+
+  const downloadMd = async () => {
+    const md = weeklyReportToMarkdown(parsed);
+    const ok = await copyToClipboard(md);
+    // Always try the file download regardless of clipboard result.
+    try {
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `nova-monday-briefing-${stamp}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch {}
+    if (ok) {
+      setDownloaded(true);
+      setTimeout(() => setDownloaded(false), 1800);
+    }
+  };
+
+  return (
+    <div>
+      {/* Subtle report header banner */}
+      <div style={{
+        margin: '0 0 6px',
+        padding: '10px 12px',
+        background: 'linear-gradient(135deg, rgba(255,154,38,0.10), rgba(53,224,138,0.06), rgba(255,106,74,0.08))',
+        border: '1px solid rgba(255,154,38,0.22)',
+        borderRadius: 4,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Sparkles size={14} color={ORANGE} strokeWidth={1.8} />
+          <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 2.2 }}>
+            MONDAY MORNING BRIEFING
+          </span>
+        </div>
+        <span style={{ fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1.2 }}>
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}
+        </span>
+      </div>
+
+      <WRCard title="SCHOLARICS WEEKLY" kicker={WR_PALETTE.scholarics.tagline}
+        palette={WR_PALETTE.scholarics} fields={parsed.scholarics} idx={1}
+        copyField={copyField} copiedKey={copiedKey} />
+      <WRCard title="ROOTED WEEKLY" kicker={WR_PALETTE.rooted.tagline}
+        palette={WR_PALETTE.rooted} fields={parsed.rooted} idx={2}
+        copyField={copyField} copiedKey={copiedKey} />
+      <WRCard title="THIS WEEK PRIORITIES" kicker={WR_PALETTE.priorities.tagline}
+        palette={WR_PALETTE.priorities} fields={parsed.priorities} idx={3}
+        copyField={copyField} copiedKey={copiedKey} />
+
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0 4px' }}>
+        <button
+          onClick={downloadMd}
+          style={{
+            background: 'linear-gradient(180deg, rgba(255,154,38,0.18), rgba(255,154,38,0.06))',
+            border: '1px solid rgba(255,154,38,0.45)',
+            color: downloaded ? '#35e08a' : ORANGE,
+            cursor: 'pointer',
+            padding: '8px 16px',
+            fontSize: 10,
+            letterSpacing: 1.8,
+            fontFamily: 'Orbitron, monospace',
+            fontWeight: 700,
+            borderRadius: 4,
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            boxShadow: '0 0 12px rgba(255,154,38,0.20)',
+          }}
+        >
+          <Download size={12} strokeWidth={2} />
+          {downloaded ? '✓ DOWNLOADED & COPIED' : 'DOWNLOAD .MD'}
+        </button>
+      </div>
+
+      <div style={{ textAlign: 'center', fontSize: 9, color: '#7a5a36', letterSpacing: 1.4, marginTop: 8 }}>
+        END OF BRIEFING · 3 PLATFORMS · {(parsed.scholarics.length + parsed.rooted.length + parsed.priorities.length)} FIELDS
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
 function NOVAOutputModal({ output, agent, onClose }) {
   const [copied, setCopied] = useState(false);
@@ -796,6 +1243,10 @@ function NOVAOutputModal({ output, agent, onClose }) {
   };
 
   const seoMode = isSeoResponse(agent, output);
+  // Weekly report mode triggers if the response actually parses into a
+  // weekly report shape. We don't gate on the prompt keywords because the
+  // agent name (e.g. "ANALYTICS") is too narrow a signal.
+  const weeklyMode = parseWeeklyReport(output) !== null;
 
   return (
     <div style={{
@@ -814,7 +1265,9 @@ function NOVAOutputModal({ output, agent, onClose }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px', flexWrap: 'wrap' }}>
           <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 2 }}>
-            ⚡ {agent} — OUTPUT {seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO STRUCTURED</span>}
+            ⚡ {agent} — OUTPUT
+            {weeklyMode && <span style={{ color: '#ff9a26', marginLeft: 6 }}>· MONDAY BRIEFING</span>}
+            {!weeklyMode && seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO STRUCTURED</span>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button onClick={copyAll} style={{ ...btnStyle, color: copiedAll ? '#35e08a' : ORANGE }} title="Copy full response">
@@ -827,7 +1280,7 @@ function NOVAOutputModal({ output, agent, onClose }) {
           </div>
         </div>
         <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
-          {seoMode ? <SEOModalBody output={output} /> : renderFormatted(output)}
+          {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderFormatted(output)}
         </div>
       </div>
     </div>
@@ -2412,9 +2865,126 @@ function MobileNOVA() {
         <MobileWorldMap />
       </main>
       <MobileCommandConsole />
+      <MobileWeeklyFab />
       <MobileBottomNav active={activeNav} onNav={go} />
       <MobileAgentModal agent={activeAgent} onClose={() => setActiveAgent(null)} />
     </div>
+  );
+}
+
+/* ═══════════════ MOBILE WEEKLY REPORT FAB ═══════════════ */
+// One-tap floating action button that fires the Monday morning briefing
+// and opens the same NOVAOutputModal the desktop console uses. The FAB
+// sits above the mobile command console on the right edge so it never
+// fights with the input field.
+function MobileWeeklyFab() {
+  const [thinking, setThinking] = useState(false);
+  const [pulse, setPulse] = useState(true);
+  const [output, setOutput] = useState(null);
+  const [agent, setAgent] = useState('NOVA');
+
+  // Soft attention pulse stops once the user has triggered it once so
+  // the FAB doesn't keep nagging. Re-enables on a fresh page load.
+  useEffect(() => {
+    const t = setTimeout(() => setPulse(false), 12000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const trigger = async () => {
+    if (thinking) return;
+    const userCmd = 'weekly report';
+    const det = 'ANALYTICS';
+    setAgent(det);
+    setThinking(true);
+    pushActivity({
+      t: nowStamp(),
+      name: det,
+      icon: agentIconFor(det),
+      text: '↳ weekly report (FAB)',
+      status: 'PROCESSING',
+    });
+    const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
+    if (ok) {
+      setOutput(reply);
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: `✓ ${summarizeCmd(reply, 60)}`,
+        status: 'SUCCESS',
+      });
+    } else {
+      setOutput(reply);
+      pushActivity({
+        t: nowStamp(),
+        name: det,
+        icon: agentIconFor(det),
+        text: '✗ Connection interrupted. Retry.',
+        status: 'FAILED',
+      });
+    }
+    setThinking(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="mobile-weekly-fab"
+        onClick={trigger}
+        disabled={thinking}
+        title={thinking ? 'Generating briefing…' : 'Run Monday morning briefing'}
+        style={{
+          position: 'fixed',
+          right: 14,
+          bottom: 218, // sits above the command console (which lives at bottom: 60–62px)
+          width: 58,
+          height: 58,
+          borderRadius: '50%',
+          background: thinking
+            ? 'linear-gradient(160deg, #2c1c0c, #1a0e03)'
+            : 'linear-gradient(160deg, #ff9a26 0%, #e8721a 55%, #b04a05 100%)',
+          border: '1px solid rgba(255,194,77,0.55)',
+          color: '#fff1d4',
+          cursor: thinking ? 'wait' : 'pointer',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 1,
+          fontFamily: 'Orbitron, monospace',
+          fontWeight: 700,
+          letterSpacing: 0.5,
+          zIndex: 70,
+          boxShadow: thinking
+            ? '0 0 10px rgba(255,154,38,0.20), inset 0 0 8px rgba(0,0,0,0.5)'
+            : '0 0 22px rgba(255,154,38,0.55), 0 0 6px rgba(255,194,77,0.85), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -2px 6px rgba(0,0,0,0.25)',
+          animation: pulse && !thinking ? 'novaFabPulse 2.4s ease-in-out infinite' : 'none',
+          transition: 'transform 100ms, background 200ms, box-shadow 200ms',
+        }}
+        onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.95)'; }}
+        onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.95)'; }}
+        onTouchEnd={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+      >
+        {thinking ? (
+          <>
+            <FileText size={20} strokeWidth={1.8} color="#ffb443" />
+            <span style={{ fontSize: 7, letterSpacing: 1.4, color: '#ffb443', marginTop: 1 }}>SYNC…</span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 20, lineHeight: 1 }}>📋</span>
+            <span style={{ fontSize: 7, letterSpacing: 1.4, marginTop: 1 }}>WEEKLY</span>
+          </>
+        )}
+      </button>
+      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
+      <style>{`
+        @keyframes novaFabPulse {
+          0%, 100% { box-shadow: 0 0 22px rgba(255,154,38,0.55), 0 0 6px rgba(255,194,77,0.85), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -2px 6px rgba(0,0,0,0.25); }
+          50%      { box-shadow: 0 0 30px rgba(255,154,38,0.85), 0 0 12px rgba(255,194,77,1.0), inset 0 1px 0 rgba(255,255,255,0.40), inset 0 -2px 6px rgba(0,0,0,0.25); }
+        }
+      `}</style>
+    </>
   );
 }
 
