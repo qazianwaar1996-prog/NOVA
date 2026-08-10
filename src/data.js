@@ -97,6 +97,19 @@ export const CONSOLE_LINES = [
 
 export const CMD_CHIPS = ['/status', '/team', '/projects', '/report', '/help'];
 
+/* Quick-prompt chips that sit below the command input. Clicking one fills
+   the input with a pre-written prompt for the user to review / edit before
+   hitting EXECUTE. The label is what shows on the chip; `prompt` is the
+   text it puts into the input. */
+export const QUICK_PROMPTS = [
+  { id: 'seo-scholarics', label: 'SEO SCHOLARICS', prompt: 'Run a full SEO audit for scholarics.com: meta title (60 chars), meta description (155 chars), og tags, JSON-LD schema, 5 keywords, internal link suggestions, and 2 quick wins. Target audience: students.' },
+  { id: 'seo-rooted',     label: 'SEO ROOTED',     prompt: 'Run a full SEO audit for rooted (parenting platform, React + FastAPI + PostgreSQL on Railway + Supabase): meta title (60 chars), meta description (155 chars), og tags, JSON-LD schema, 5 keywords, internal link suggestions, and 2 quick wins. Target markets: USA, UK, Canada, Australia — use local spelling and phrasing.' },
+  { id: 'write-blog',     label: 'WRITE BLOG',     prompt: 'Write a 1200-word SEO article for scholarics.com on the topic: "How to Calculate Your GPA — A Complete Guide for High School and College Students". Include H1, H2s, intro, body, conclusion, and a CTA. Student-friendly tone. End with "Anything else on this, Anwaar?"' },
+  { id: 'yt-script',      label: 'YOUTUBE SCRIPT', prompt: 'Write a 10-minute YouTube script on the topic: "5 Study Tips That Actually Work in 2026 (Backed by Science)". Start with a dramatic statement hook (NEVER a question). Include timestamps every 30-60 seconds, 3 title options, a description, 15 tags, and thumbnail text. End with "Anything else on this, Anwaar?"' },
+  { id: 'ig-posts',       label: 'INSTAGRAM POSTS',prompt: 'Write 7 Instagram posts for rooted (parenting platform) — one for each day of the week. Each post needs a caption (parent-friendly, warm tone), 10 hashtags, and a CTA. Mix of educational, relatable, and product-focused. End with "Anything else on this, Anwaar?"' },
+  { id: 'weekly-report',  label: 'WEEKLY REPORT',  prompt: 'Generate a weekly performance report for scholarics.com covering the last 7 days. Include: top 5 pages by traffic, AdSense RPM and CTR, search keyword wins, indexing errors, and 3 priority actions for next week. End with "Anything else on this, Anwaar?"' },
+];
+
 // ── Network map hubs / arcs (geo coords) ──
 export const HUBS = [
   { id: 'la',   lon: -118.2, lat: 34.0 },

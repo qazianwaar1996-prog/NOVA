@@ -1185,3 +1185,13 @@ body {
   .mobile-agent-card { flex-basis: 286px; }
 }
 
+/* ── Quick-prompt chip rows (desktop + mobile) ── */
+.quick-chip-row::-webkit-scrollbar,
+.mobile-quick-chips::-webkit-scrollbar { height: 4px; }
+.quick-chip-row::-webkit-scrollbar-track,
+.mobile-quick-chips::-webkit-scrollbar-track { background: transparent; }
+.quick-chip-row::-webkit-scrollbar-thumb,
+.mobile-quick-chips::-webkit-scrollbar-thumb { background: rgba(255,154,38,0.4); border-radius: 2px; }
+.quick-chip-row::-webkit-scrollbar-thumb:hover,
+.mobile-quick-chips::-webkit-scrollbar-thumb:hover { background: rgba(255,154,38,0.7); }
+

@@ -9,7 +9,7 @@ import {
 import { MAP_DOTS } from './dots.js';
 import {
   STATS, NAV, SYS_STATUS, AGENTS_LEFT, AGENTS_RIGHT, FEED, APIS, PERF,
-  PROJECTS, TASKS, CONSOLE_LINES, CMD_CHIPS, HUBS, ARCS,
+  PROJECTS, TASKS, CONSOLE_LINES, CMD_CHIPS, QUICK_PROMPTS, HUBS, ARCS,
 } from './data.js';
 
 const ICONS = {
@@ -208,9 +208,532 @@ const nowStamp = () => {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
 
+/* ═══════════════ SEO OUTPUT RENDERER ═══════════════ */
+// Heuristic parser that pulls structured sections out of an SEO Agent
+// response. Looks for section headers like "META TAGS", "OG TAGS",
+// "SCHEMA MARKUP", "KEYWORDS", and "QUICK WINS" and captures the body
+// under each one until the next header.
+const SEO_SECTION_RE = /\b(META\s+TAGS?|OG\s+TAGS?|SCHEMA\s+MARKUP|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\b/i;
+const SEO_HEADER_RE = /^\s*(META\s+TAGS?|OG\s+TAGS?|SCHEMA\s+MARKUP|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\s*[:\-]?\s*$/i;
+const SEO_KV_RE = /^([A-Za-z][\w\-\s]{0,40}?(?:\s*\(\s*\d+\s*(?:chars?|ch)?\s*\))?)\s*[:\-]\s+(.+)$/;
+
+function parseSeoOutput(text) {
+  if (!text) return null;
+  const lines = String(text).split(/\r?\n/);
+  // Slice the text into sections by walking the lines and tracking the
+  // current section header. A header is a standalone line (or a line
+  // ending with ':') that matches the known SEO section names.
+  const sections = { _raw: text };
+  let cur = null;
+  let buf = [];
+  const flush = () => {
+    if (!cur) return;
+    sections[cur] = buf.join('\n').trim();
+    buf = [];
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(SEO_HEADER_RE);
+    if (headerMatch) {
+      flush();
+      cur = headerMatch[1].toUpperCase().replace(/[-\s]+/g, ' ').trim();
+      // Normalize a few common variants
+      if (cur === 'JSON LD') cur = 'SCHEMA MARKUP';
+      if (cur === 'META TAG') cur = 'META TAGS';
+      if (cur === 'OG TAG') cur = 'OG TAGS';
+      if (cur === 'KEYWORD') cur = 'KEYWORDS';
+      if (cur === 'QUICK WIN') cur = 'QUICK WINS';
+      continue;
+    }
+    if (cur) buf.push(line);
+  }
+  flush();
+  // --- META TAGS -----------------------------------------------------------
+  const meta = {};
+  const metaBlock = sections['META TAGS'] || '';
+  // Pull key:value pairs from the meta block. Tolerates "(60 chars)" hints.
+  metaBlock.split(/\r?\n/).forEach((ln) => {
+    const m = ln.match(SEO_KV_RE);
+    if (!m) return;
+    const key = m[1].trim().toLowerCase()
+      .replace(/\s*\(\s*\d+\s*(?:chars?|ch)?\s*\)\s*$/, '')
+      .replace(/\s+/g, ' ');
+    if (/^title|^meta\s*title/.test(key)) meta.title = m[2].trim();
+    else if (/^desc/.test(key)) meta.description = m[2].trim();
+    else if (/^keywords?/.test(key)) meta.keywords = m[2].trim();
+    else if (/^canonical/.test(key)) meta.canonical = m[2].trim();
+    else if (/^robots/.test(key)) meta.robots = m[2].trim();
+  });
+  // --- OG TAGS -------------------------------------------------------------
+  const og = {};
+  const ogBlock = sections['OG TAGS'] || '';
+  ogBlock.split(/\r?\n/).forEach((ln) => {
+    const m = ln.match(SEO_KV_RE);
+    if (!m) return;
+    const key = m[1].trim().toLowerCase().replace(/^og\s+/, 'og:').replace(/\s+/g, '');
+    const val = m[2].trim();
+    if (/^og:/.test(key)) og[key] = val;
+  });
+  // Also try to capture og:xxx = "yyy" pairs from inside code blocks if the
+  // og section is empty.
+  if (Object.keys(og).length === 0) {
+    const re = /og:([a-z\-]+)\s*[:=]\s*"?([^"\n]+?)"?\s*$/gim;
+    let m;
+    while ((m = re.exec(text)) !== null) og[`og:${m[1].toLowerCase()}`] = m[2].trim();
+  }
+  // --- SCHEMA MARKUP -------------------------------------------------------
+  let schema = '';
+  // Prefer a fenced code block (json / jsonld / html) sitting under the
+  // SCHEMA MARKUP section, otherwise grab the raw section.
+  const schemaBlock = sections['SCHEMA MARKUP'] || '';
+  const fenced = schemaBlock.match(/```(?:json|jsonld|html)?\n([\s\S]*?)```/);
+  if (fenced) {
+    schema = fenced[1].trim();
+  } else if (schemaBlock) {
+    // Strip the first line if it's just a section header echo
+    const cleaned = schemaBlock.replace(/^\s*(here'?s|schema|json-?ld)\s*[:\-]?\s*/i, '');
+    schema = cleaned.trim();
+  }
+  // --- KEYWORDS ------------------------------------------------------------
+  const kwBlock = sections['KEYWORDS'] || '';
+  const keywords = [];
+  // Strip an optional leading list marker (e.g. "1. ", "- ", "• ") from a
+  // single line of text. Doesn't eat leading digits from real words like
+  // "4.0 scale" — only matches when the digit is followed by `.` or `)`.
+  const stripListMarker = (s) => s
+    .replace(/^\s*(?:\d+[.)]\s+|[-*•]\s+)/, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+  if (kwBlock) {
+    // First try comma-separated
+    const csv = kwBlock.match(/([^\n]+(?:,[^\n]+)+)/);
+    if (csv) {
+      csv[1].split(',').forEach((k) => {
+        const t = stripListMarker(k.trim());
+        if (t) keywords.push(t);
+      });
+    }
+    // Also pull numbered / bulleted items, dedup
+    const seen = new Set(keywords.map((k) => k.toLowerCase()));
+    kwBlock.split(/\r?\n/).forEach((ln) => {
+      const m = ln.match(/^\s*(?:\d+[\.\)]\s*|[\-\*\u2022]\s*)(.+)$/);
+      if (!m) return;
+      const t = stripListMarker(m[1]);
+      if (t && !seen.has(t.toLowerCase())) { keywords.push(t); seen.add(t.toLowerCase()); }
+    });
+  }
+  // --- QUICK WINS ----------------------------------------------------------
+  const winsBlock = sections['QUICK WINS'] || '';
+  const wins = [];
+  if (winsBlock) {
+    winsBlock.split(/\r?\n/).forEach((ln) => {
+      const m = ln.match(/^\s*(?:\d+[\.\)]\s*|[\-\*\u2022]\s*)(.+)$/);
+      if (m) wins.push(m[1].trim());
+      else if (ln.trim() && wins.length === 0) wins.push(ln.trim());
+    });
+    // If we still didn't get numbered items, fall back to splitting on
+    // sentence boundaries.
+    if (wins.length === 0) {
+      winsBlock.split(/(?<=\.)\s+(?=[A-Z])/).forEach((s) => {
+        const t = s.trim();
+        if (t) wins.push(t);
+      });
+    }
+  }
+  // Heuristic: did we actually find anything SEO-shaped?
+  const hit = (
+    Object.keys(meta).length > 0 ||
+    Object.keys(og).length > 0 ||
+    schema ||
+    keywords.length > 0 ||
+    wins.length > 0
+  );
+  return hit ? { meta, og, schema, keywords, wins } : null;
+}
+
+/* Detect if the response is an SEO-shaped payload. */
+function isSeoResponse(agent, text) {
+  if (/SEO/i.test(agent || '')) return true;
+  if (!text) return false;
+  return /meta\s+title|og:title|json-?ld|schema\s+markup|quick\s+wins/i.test(text);
+}
+
+/* Inline pretty-print a JSON-LD string with a touch of syntax highlighting
+   (keys green, strings orange, numbers cyan, braces dim). Used for the
+   SCHEMA MARKUP code panel. */
+function highlightJson(json) {
+  if (!json) return null;
+  // Tokenize: strings (incl. escaped), numbers, braces, brackets, colons, commas
+  const tokens = [];
+  const re = /("(?:\\.|[^"\\])*"\s*:?)|(\btrue\b|\bfalse\b|\bnull\b)|(-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)|([\{\}\[\],])/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(json)) !== null) {
+    if (m.index > last) tokens.push({ t: 'raw', v: json.slice(last, m.index) });
+    if (m[1] !== undefined) {
+      // is it a key? (ends with `:`)
+      if (m[1].endsWith(':')) tokens.push({ t: 'key', v: m[1].slice(0, -1) });
+      else tokens.push({ t: 'str', v: m[1] });
+    } else if (m[2] !== undefined) tokens.push({ t: 'lit', v: m[2] });
+    else if (m[3] !== undefined) tokens.push({ t: 'num', v: m[3] });
+    else if (m[4] !== undefined) tokens.push({ t: 'punc', v: m[4] });
+    last = m.index + m[0].length;
+  }
+  if (last < json.length) tokens.push({ t: 'raw', v: json.slice(last) });
+  const style = {
+    key:  { color: '#9be8b6' },         // green for keys
+    str:  { color: '#ffb97a' },         // warm orange for string values
+    num:  { color: '#5ac8ff' },         // cyan for numbers
+    lit:  { color: '#c08aff' },         // purple for true/false/null
+    punc: { color: '#9a7bff' },         // muted purple for punctuation
+    raw:  { color: '#ffd9a8' },
+  };
+  return tokens.map((tk, i) => (
+    <span key={i} style={style[tk.t]}>{tk.v}</span>
+  ));
+}
+
+/* Shared visual primitives for the SEO modal --------------------------- */
+const ORANGE = '#ff9a26';
+const ORANGE_DIM = 'rgba(255,154,38,0.35)';
+const ORANGE_SOFT = 'rgba(255,154,38,0.18)';
+const MONO = '"Share Tech Mono", "JetBrains Mono", ui-monospace, monospace';
+const sectionHeaderStyle = (extra = {}) => ({
+  fontFamily: 'Orbitron, monospace',
+  fontSize: 10,
+  letterSpacing: 2.4,
+  color: ORANGE,
+  textTransform: 'uppercase',
+  borderBottom: `1px solid ${ORANGE_DIM}`,
+  paddingBottom: 4,
+  margin: '14px 0 8px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  ...extra,
+});
+const copyableInputStyle = {
+  width: '100%',
+  background: 'rgba(0,0,0,0.55)',
+  border: '1px solid rgba(255,154,38,0.25)',
+  borderRadius: 4,
+  padding: '8px 10px',
+  color: '#ffd9a8',
+  fontFamily: MONO,
+  fontSize: 11,
+  boxSizing: 'border-box',
+  outline: 'none',
+};
+const sectionLabel = {
+  fontSize: 9,
+  letterSpacing: 1.6,
+  color: '#cfa875',
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  marginBottom: 4,
+  display: 'block',
+};
+const codePanelStyle = {
+  background: 'rgba(0,0,0,0.6)',
+  border: `1px solid ${ORANGE_DIM}`,
+  borderRadius: 4,
+  padding: '10px 12px',
+  margin: '8px 0',
+  fontFamily: MONO,
+  fontSize: 11,
+  color: '#ffd9a8',
+  overflowX: 'auto',
+  whiteSpace: 'pre',
+  lineHeight: 1.55,
+};
+const btnStyle = {
+  background: 'none',
+  border: `1px solid ${ORANGE_DIM}`,
+  color: ORANGE,
+  cursor: 'pointer',
+  padding: '4px 10px',
+  fontSize: 9.5,
+  borderRadius: 3,
+  fontFamily: MONO,
+  letterSpacing: 1,
+};
+/* Small wrapper around navigator.clipboard with an execCommand fallback. */
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  }
+}
+
+/* SEO Modal — renders the parsed sections. Receives the original raw
+   `output` so it can still COPY ALL the original text. */
+function SEOModalBody({ output }) {
+  const seo = useMemo(() => parseSeoOutput(output), [output]);
+  const [copiedField, setCopiedField] = useState(null);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [doneWins, setDoneWins] = useState({});
+
+  if (!seo) {
+    // Should not normally happen because the parent decides whether to
+    // render this body, but fall back to the plain text.
+    return <pre style={codePanelStyle}>{output}</pre>;
+  }
+
+  const { meta, og, schema, keywords, wins } = seo;
+  const hasOg = Object.keys(og).length > 0;
+  const standardOg = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type', 'og:site_name'];
+  const ogEntries = standardOg
+    .filter((k) => og[k])
+    .map((k) => [k, og[k]])
+    .concat(Object.keys(og).filter((k) => !standardOg.includes(k)).map((k) => [k, og[k]]));
+
+  const flashCopied = (setter, key) => {
+    setter(key);
+    setTimeout(() => setter(null), 1400);
+  };
+
+  const onCopyField = async (key, value) => {
+    const ok = await copyToClipboard(value);
+    if (ok) flashCopied(setCopiedField, key);
+  };
+  const onCopyCode = async () => {
+    const ok = await copyToClipboard(schema);
+    if (ok) { setCopiedCode(true); setTimeout(() => setCopiedCode(false), 1400); }
+  };
+
+  return (
+    <div>
+      {/* ── META TAGS ─────────────────────────────────────────────── */}
+      {Object.keys(meta).length > 0 && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Meta Tags</div>
+          {meta.title !== undefined && (
+            <div style={{ marginBottom: 8 }}>
+              <span style={sectionLabel}>Title ({meta.title.length}/60)</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                <input
+                  readOnly
+                  value={meta.title}
+                  onFocus={(e) => e.target.select()}
+                  style={copyableInputStyle}
+                />
+                <button
+                  style={btnStyle}
+                  onClick={() => onCopyField('title', meta.title)}
+                  title="Copy meta title"
+                >{copiedField === 'title' ? 'COPIED' : 'COPY'}</button>
+              </div>
+              <div style={{ height: 2, marginTop: 4, background: 'rgba(255,154,38,0.12)', borderRadius: 1 }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(100, (meta.title.length / 60) * 100)}%`,
+                  background: meta.title.length > 60 ? '#ff6a4a' : ORANGE,
+                  boxShadow: `0 0 6px ${meta.title.length > 60 ? '#ff6a4a' : ORANGE}`,
+                }} />
+              </div>
+            </div>
+          )}
+          {meta.description !== undefined && (
+            <div style={{ marginBottom: 8 }}>
+              <span style={sectionLabel}>Description ({meta.description.length}/155)</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                <textarea
+                  readOnly
+                  rows={3}
+                  value={meta.description}
+                  onFocus={(e) => e.target.select()}
+                  style={{ ...copyableInputStyle, resize: 'vertical', minHeight: 56 }}
+                />
+                <button
+                  style={btnStyle}
+                  onClick={() => onCopyField('description', meta.description)}
+                  title="Copy meta description"
+                >{copiedField === 'description' ? 'COPIED' : 'COPY'}</button>
+              </div>
+              <div style={{ height: 2, marginTop: 4, background: 'rgba(255,154,38,0.12)', borderRadius: 1 }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(100, (meta.description.length / 155) * 100)}%`,
+                  background: meta.description.length > 155 ? '#ff6a4a' : ORANGE,
+                  boxShadow: `0 0 6px ${meta.description.length > 155 ? '#ff6a4a' : ORANGE}`,
+                }} />
+              </div>
+            </div>
+          )}
+          {meta.canonical && (
+            <CopyableRow label="Canonical" value={meta.canonical}
+              copied={copiedField === 'canonical'}
+              onCopy={() => onCopyField('canonical', meta.canonical)} />
+          )}
+          {meta.robots && (
+            <CopyableRow label="Robots" value={meta.robots}
+              copied={copiedField === 'robots'}
+              onCopy={() => onCopyField('robots', meta.robots)} />
+          )}
+        </>
+      )}
+
+      {/* ── OG TAGS ────────────────────────────────────────────────── */}
+      {hasOg && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Open Graph Tags</div>
+          {ogEntries.map(([k, v]) => (
+            <CopyableRow
+              key={k}
+              label={k}
+              value={v}
+              copied={copiedField === k}
+              onCopy={() => onCopyField(k, v)}
+            />
+          ))}
+        </>
+      )}
+
+      {/* ── SCHEMA MARKUP ──────────────────────────────────────────── */}
+      {schema && (
+        <>
+          <div style={sectionHeaderStyle({
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          })}>
+            <span>▸ Schema Markup (JSON-LD)</span>
+            <button
+              style={{ ...btnStyle, color: copiedCode ? '#35e08a' : ORANGE }}
+              onClick={onCopyCode}
+              title="Copy JSON-LD code"
+            >{copiedCode ? '✓ COPIED' : '⎘ COPY CODE'}</button>
+          </div>
+          <pre style={codePanelStyle}>{highlightJson(schema)}</pre>
+        </>
+      )}
+
+      {/* ── KEYWORDS ───────────────────────────────────────────────── */}
+      {keywords.length > 0 && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Keywords ({keywords.length})</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '2px 0 4px' }}>
+            {keywords.map((k, i) => (
+              <span
+                key={`${k}-${i}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '4px 9px',
+                  background: 'rgba(255,154,38,0.10)',
+                  border: `1px solid ${ORANGE_SOFT}`,
+                  color: '#ffc24d',
+                  borderRadius: 999,
+                  fontFamily: MONO,
+                  fontSize: 10,
+                  letterSpacing: 0.4,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: ORANGE, boxShadow: `0 0 5px ${ORANGE}` }} />
+                {k}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── QUICK WINS ─────────────────────────────────────────────── */}
+      {wins.length > 0 && (
+        <>
+          <div style={sectionHeaderStyle()}>▸ Quick Wins ({wins.length})</div>
+          <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {wins.map((w, i) => {
+              const done = !!doneWins[i];
+              return (
+                <li
+                  key={i}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 9,
+                    padding: '6px 4px',
+                    borderTop: i === 0 ? 'none' : '1px dashed rgba(255,154,38,0.10)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setDoneWins((d) => ({ ...d, [i]: !d[i] }))}
+                    style={{
+                      flex: 'none',
+                      width: 16, height: 16, marginTop: 2,
+                      borderRadius: 3,
+                      background: done ? ORANGE : 'transparent',
+                      border: `1px solid ${done ? ORANGE : ORANGE_DIM}`,
+                      color: done ? '#1a0e03' : ORANGE,
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, lineHeight: 1, fontWeight: 700,
+                      boxShadow: done ? `0 0 6px ${ORANGE}` : 'none',
+                    }}
+                    aria-pressed={done}
+                    aria-label={done ? 'Mark incomplete' : 'Mark complete'}
+                  >{done ? '✓' : ''}</button>
+                  <span style={{
+                    flex: 'none',
+                    width: 18, fontFamily: MONO, fontSize: 10, color: ORANGE,
+                    fontWeight: 700, textAlign: 'right',
+                  }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span style={{
+                    flex: 1,
+                    color: done ? '#7a5a36' : '#e8c98a',
+                    textDecoration: done ? 'line-through' : 'none',
+                    lineHeight: 1.5,
+                  }}>{w}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      )}
+
+      {/* Anything we couldn't classify is shown as a small footer block */}
+      <div style={{ marginTop: 16, fontSize: 9, color: '#7a5a36', textAlign: 'center', letterSpacing: 1 }}>
+        END OF SEO PAYLOAD · {Object.keys(meta).length + ogEntries.length + (schema ? 1 : 0) + keywords.length + wins.length} FIELDS
+      </div>
+    </div>
+  );
+}
+
+function CopyableRow({ label, value, copied, onCopy }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <span style={sectionLabel}>{label}</span>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+        <input
+          readOnly
+          value={value}
+          onFocus={(e) => e.target.select()}
+          style={copyableInputStyle}
+        />
+        <button
+          style={{ ...btnStyle, color: copied ? '#35e08a' : ORANGE }}
+          onClick={onCopy}
+          title={`Copy ${label}`}
+        >{copied ? 'COPIED' : 'COPY'}</button>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
 function NOVAOutputModal({ output, agent, onClose }) {
   const [copied, setCopied] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
   if (!output) return null;
 
   // Render text with light formatting: code blocks (```...```) become styled blocks;
@@ -258,20 +781,21 @@ function NOVAOutputModal({ output, agent, onClose }) {
   };
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(output);
+    const ok = await copyToClipboard(output);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // fallback
-      const ta = document.createElement('textarea');
-      ta.value = output;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
-      document.body.removeChild(ta);
     }
   };
+  const copyAll = async () => {
+    const ok = await copyToClipboard(output);
+    if (ok) {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    }
+  };
+
+  const seoMode = isSeoResponse(agent, output);
 
   return (
     <div style={{
@@ -284,23 +808,26 @@ function NOVAOutputModal({ output, agent, onClose }) {
         background: 'linear-gradient(160deg, #1a0e03, #0a0500)',
         border: '1px solid rgba(255,154,38,0.4)',
         borderRadius: '8px', padding: '20px',
-        width: '100%', maxWidth: '640px',
+        width: '100%', maxWidth: '680px',
         maxHeight: '80vh', overflow: 'auto',
         boxShadow: '0 0 40px rgba(255,130,10,0.2)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px' }}>
-          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '10px', color: '#ff9a26', letterSpacing: '2px' }}>
-            ⚡ {agent} — OUTPUT
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 2 }}>
+            ⚡ {agent} — OUTPUT {seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO STRUCTURED</span>}
           </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button onClick={copy} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: copied ? '#35e08a' : '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={copyAll} style={{ ...btnStyle, color: copiedAll ? '#35e08a' : ORANGE }} title="Copy full response">
+              {copiedAll ? '✓ COPIED ALL' : '⎘ COPY ALL'}
+            </button>
+            <button onClick={copy} style={{ ...btnStyle, color: copied ? '#35e08a' : ORANGE }}>
               {copied ? 'COPIED' : 'COPY'}
             </button>
-            <button onClick={onClose} style={{ background: 'none', border: '1px solid rgba(255,154,38,0.3)', color: '#ff9a26', cursor: 'pointer', padding: '4px 10px', fontSize: '10px', borderRadius: '3px', fontFamily: 'monospace' }}>CLOSE</button>
+            <button onClick={onClose} style={btnStyle}>CLOSE</button>
           </div>
         </div>
-        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#e8c98a', lineHeight: '1.7', wordBreak: 'break-word' }}>
-          {renderFormatted(output)}
+        <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
+          {seoMode ? <SEOModalBody output={output} /> : renderFormatted(output)}
         </div>
       </div>
     </div>
@@ -1169,6 +1696,63 @@ function CommandBar() {
           <button className="sqbtn" style={{ fontFamily: 'var(--fm)', fontSize: 8.5, letterSpacing: 1, color: 'var(--tx-dim)' }}>{c}</button>
         </Chamfer>
       ))}
+
+      {/* ── Quick-prompt chips: sit just below the input bar and fill the
+           command input with a pre-written prompt when clicked.          */}
+      <div
+        className="quick-chip-row"
+        style={{
+          position: 'absolute', left: 6, top: 1022, width: 1556, height: 32,
+          display: 'flex', alignItems: 'center', gap: 8,
+          overflowX: 'auto', overflowY: 'hidden',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+          paddingLeft: 6,
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--fm)', fontSize: 8, color: '#7a5a36',
+          letterSpacing: 1.4, paddingRight: 4, flex: 'none',
+        }}>QUICK ▸</span>
+        {QUICK_PROMPTS.map((q) => (
+          <button
+            key={q.id}
+            type="button"
+            title={q.prompt}
+            onClick={() => { setCmd(q.prompt); setFlash(true); setTimeout(() => setFlash(false), 380); }}
+            className="quick-chip"
+            style={{
+              flex: 'none',
+              height: 26, padding: '0 12px',
+              background: 'linear-gradient(180deg, rgba(255,154,38,0.12), rgba(255,154,38,0.04))',
+              border: '1px solid rgba(255,154,38,0.4)',
+              color: '#ffb443',
+              fontFamily: 'var(--fm)', fontSize: 9.5, letterSpacing: 1.4, fontWeight: 700,
+              borderRadius: 3, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              boxShadow: '0 0 6px rgba(255,154,38,0.18), inset 0 0 0 1px rgba(255,154,38,0.08)',
+              transition: 'background 120ms, box-shadow 120ms, color 120ms, transform 80ms',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.28), rgba(255,154,38,0.10))';
+              e.currentTarget.style.color = '#fff1d4';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(255,154,38,0.45), inset 0 0 0 1px rgba(255,154,38,0.18)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.12), rgba(255,154,38,0.04))';
+              e.currentTarget.style.color = '#ffb443';
+              e.currentTarget.style.boxShadow = '0 0 6px rgba(255,154,38,0.18), inset 0 0 0 1px rgba(255,154,38,0.08)';
+            }}
+            onMouseDown={(e) => { e.currentTarget.style.transform = 'translateY(1px)'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
+          >
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#ff9a26', boxShadow: '0 0 5px #ff9a26' }} />
+            {q.label}
+          </button>
+        ))}
+      </div>
+
       {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </>
   );
@@ -1182,7 +1766,7 @@ function DesktopNOVA() {
   useEffect(() => {
     const el = vpRef.current;
     const set = () => {
-      const s = Math.min(window.innerWidth / 1564, window.innerHeight / 1036);
+      const s = Math.min(window.innerWidth / 1564, window.innerHeight / 1056);
       el.style.setProperty('--s', s);
     };
     set();
@@ -1737,6 +2321,47 @@ function MobileCommandConsole() {
         <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && exec()} placeholder="ENTER COMMAND..." aria-label="Enter command" />
         <button type="button" className="mobile-mic" title="Voice command"><Mic size={17} /></button>
         <button type="button" className="mobile-execute" onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
+      </div>
+      <div
+        className="mobile-quick-chips"
+        style={{
+          marginTop: 8,
+          display: 'flex', alignItems: 'center', gap: 6,
+          overflowX: 'auto', overflowY: 'hidden',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+          paddingBottom: 2,
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--fm)', fontSize: 7.5, color: '#7a5a36',
+          letterSpacing: 1.4, paddingRight: 2, flex: 'none',
+        }}>QUICK ▸</span>
+        {QUICK_PROMPTS.map((q) => (
+          <button
+            key={q.id}
+            type="button"
+            title={q.prompt}
+            onClick={() => setCmd(q.prompt)}
+            style={{
+              flex: 'none',
+              height: 22, padding: '0 9px',
+              background: 'linear-gradient(180deg, rgba(255,154,38,0.14), rgba(255,154,38,0.04))',
+              border: '1px solid rgba(255,154,38,0.4)',
+              color: '#ffb443',
+              fontFamily: 'var(--fm)', fontSize: 8, letterSpacing: 1.2, fontWeight: 700,
+              borderRadius: 3, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              boxShadow: '0 0 5px rgba(255,154,38,0.16), inset 0 0 0 1px rgba(255,154,38,0.06)',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#fff1d4'; e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.28), rgba(255,154,38,0.10))'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#ffb443'; e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.14), rgba(255,154,38,0.04))'; }}
+          >
+            <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#ff9a26', boxShadow: '0 0 4px #ff9a26' }} />
+            {q.label}
+          </button>
+        ))}
       </div>
       {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
     </div>
