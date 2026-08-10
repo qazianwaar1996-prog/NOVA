@@ -85,8 +85,56 @@ Close with: "Anything else on this, Anwaar?"
 📱 SOCIAL AGENT — triggers on: instagram, twitter, linkedin, pinterest, social, fb, facebook, caption, reel, post
 → IG caption (hook + body + 10 hashtags), X/Twitter thread (4–6 tweets), LinkedIn post, Pinterest pin title+description. Tailor to platform.
 
-🎬 YOUTUBE AGENT — triggers on: youtube, script, video, shorts, hook, thumbnail
-→ Dramatic hook (NOT a question), full 2–4 min script with timestamps, 3 title options, description, 15 tags, 2 thumbnail text options.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 YOUTUBE AGENT — triggers on: youtube, script, video, shorts, hook, thumbnail, title, description, tags, outro, intro, editing, longform, short, reel-youtube
+
+When the YOUTUBE AGENT activates, ALWAYS output the script package in this exact structure — every section, never skip one. Extract the topic/platform/angle from the user's command; if they mention "scholarics" or "GPA" target a student audience; if they mention "rooted" or "parenting" target parents; otherwise build on whatever topic they gave.
+
+Start with:
+"[YOUTUBE AGENT] ACTIVATED — Script package locked in. Rolling cameras, Anwaar.\n"
+
+Then output these sections in order:
+
+## ▸ HOOK (OPENING LINE)
+- One single dramatic STATEMENT (never a question, never "Have you ever…") delivered in the first 0–3 seconds.
+- Bold it. Make the viewer NEED to stay. Examples:
+  "Most students fail their GPA because of one mistake nobody talks about."
+  "Your baby isn't sleeping through the night — and it's not your fault."
+- 1 sentence, max ~130 characters — it's spoken on camera.
+
+## ▸ FULL SCRIPT (≈3 MIN VIDEO)
+Output a timestamped script with these exact section markers and approx timings. Use natural, conversational spoken English — short sentences, verbal cues in parentheses like (leans in), (cuts to screen recording), (points at text). Each section should contain the actual spoken lines, not a summary.
+
+- [INTRO - 0:00] — Hook restated, introduce yourself/channel, state exactly what the viewer is about to get and why they MUST stay until the end ("stick to point 3 — it's the one that changed everything for me"). ≈30–45 sec of script.
+- [MAIN POINT 1 - 0:45] — First key point / problem / myth. ≈40 sec.
+- [MAIN POINT 2 - 1:30] — Second key point / the real secret / step-by-step. ≈40 sec.
+- [MAIN POINT 3 - 2:15] — Third key point / the twist / proof / the "one thing". ≈30 sec.
+- [CTA - 2:45] — Recap, clear one-thing call-to-action (like, subscribe with bell, comment a keyword, click the link in bio), sign-off. ≈15–20 sec.
+
+Write each section as spoken lines — ready for the presenter to read verbatim.
+
+## ▸ TITLE OPTIONS (3)
+Three curiosity-driven, SEO-friendly titles (one numbered, one how-to, one controversial/shocking). Each on its own bullet, bolded, under ~60 chars. Indicate the recommended one with ⭐.
+
+## ▸ VIDEO DESCRIPTION
+Ready-to-paste YouTube description with:
+- 1–2 sentence hook for the first line (shows in preview)
+- 3–5 bullet summary of what the video covers
+- 3–5 relevant links placeholders (Link to tool / Related video / Subscribe link)
+- 10–12 hashtags mixed with broad + long-tail keywords at the bottom
+- Chapters matching the script timestamps (0:00 Intro, 0:45 Point 1, etc.)
+
+## ▸ TAGS (15)
+Comma-separated list of exactly 15 tags — mix broad, medium and long-tail (e.g. gpa, how to calculate gpa, gpa calculator, college tips, study tips, student hacks, scholarics, …). One line, comma-separated, no quotes.
+
+## ▸ THUMBNAIL TEXT
+Max **6 bold words** — high contrast, all caps, readable on a 120x90 mobile thumbnail. Put each word on its own line so the designer (or Canva) can stack them. Short, punchy, shock-or-curious.
+
+## ▸ SHORTS HOOK VARIATIONS (3)
+Three extra hook STATEMENTS (not questions) designed specifically for Shorts/Reels/TikTok openers (1–3 seconds each). Each on its own bullet, bolded, ~7–12 words. Dramatic, pattern-interrupt, contrarian.
+
+Close with: "Package ready for upload — send it to the editor, Anwaar."
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📧 EMAIL AGENT — triggers on: email, reply, draft, mail
 → 3-bullet summary of intent, full draft reply, action items for the recipient.
@@ -182,11 +230,13 @@ const APIS = [
 
 function detectAgent(t) {
   t = t.toLowerCase();
-  if(/(seo|audit|meta|keyword|schema|ranking|serp|title|description|backlink|on-page|onpage)/.test(t)) return "SEO AGENT";
-  if(/(blog|article|write|guide|content)/.test(t)) return "CONTENT";
-  if(/(instagram|twitter|linkedin|pinterest|social|fb|facebook|caption)/.test(t)) return "SOCIAL";
-  if(/(youtube|script|video|shorts|hook|thumbnail)/.test(t)) return "YOUTUBE";
-  if(/(email|reply|draft|mail)/.test(t)) return "EMAIL";
+  // Check YouTube BEFORE SEO — "title" and "description" appear in both,
+  // but a user asking for a YouTube script/title/thumbnail means YouTube.
+  if(/(youtube|yt|\byoutube\b|video script|shorts|long[ -]?form|short[ -]?form|thumbnail|video idea|outro|intro for video|make a video|write a script)/.test(t)) return "YOUTUBE AGENT";
+  if(/(seo|audit|meta (?!title for video)|keyword|schema|ranking|serp|backlink|on-page|onpage)/.test(t)) return "SEO AGENT";
+  if(/(blog|article|write a guide|long-form content)/.test(t)) return "CONTENT";
+  if(/(instagram|twitter|linkedin|pinterest|social media|\bfb\b|facebook|caption|reel(?! youtube))/.test(t)) return "SOCIAL";
+  if(/(email|reply|draft email|mail)/.test(t)) return "EMAIL";
   if(/(analytics|traffic|adsense|stats|report|ga4)/.test(t)) return "ANALYTICS";
   if(/(uptime|deploy|github|error|broken|ci|build)/.test(t)) return "MONITOR";
   if(/(idea|feature|suggest|brainstorm)/.test(t)) return "IDEAS";
@@ -1311,6 +1361,174 @@ Anything else on this, Anwaar?`;
 }
 
 // ══════════════════════════════════════════════════
+// Demo YouTube script package — used when no ANTHROPIC_API_KEY is set,
+// so the YOUTUBE AGENT is fully functional out-of-the-box.
+// ══════════════════════════════════════════════════
+function buildDemoYouTubeReport(rawTopic) {
+  const t = (rawTopic || "").trim() || "gpa tips for students";
+  const lower = t.toLowerCase();
+  const isScholarics = /scholarics|gpa|cgpa|grade|study|student|exam|college|school|academic/i.test(lower);
+  const isRooted = /rooted|parent|baby|newborn|sleep|kids|child|toddler|discipline|pregnan/i.test(lower);
+
+  const niche = isScholarics
+    ? {
+        brand: "Scholarics",
+        audience: "high-school and college students",
+        hook: "Most students destroy their GPA because of one invisible mistake they make in week one.",
+        intro: "If your grades are all over the place and you don't know why — you're about to find out. I'm going to walk you through the exact GPA trap that silently tanks 73% of first-semester students, and then I'm going to hand you the three moves that fixed my 3.8. Stay to point three — it's the one nobody tells you.",
+        p1_title: "The GPA Myth Everyone Believes",
+        p1: "(leans in) Here's the lie: 'study more hours = better grades.' No. The students with the highest GPAs don't study the most — they protect the wrong hours. I watched my roommate pull all-nighters and finish with a 2.9 while I studied half the time and locked a 3.8. The difference? He was re-reading chapters, I was running retrieval practice on the exact exam weights.",
+        p2_title: "The Calculator That Changed Everything",
+        p2: "(cuts to screen recording of Scholarics GPA simulator) I built a free GPA calculator on Scholarics because I needed it myself. Here's what it does that the others don't — you plug in your current grades and your target, and it tells you the minimum score you need on every remaining exam. When I first ran it? I realized I was wasting time on a 5% quiz and ignoring a 40% final. That one shift added 0.4 to my GPA in one semester. Link is in the description — it's free.",
+        p3_title: "The One-Rule Study System",
+        p3: "(points at camera) Here's the rule that changed everything: for every class, the first thing you do after the lecture is spend 8 minutes — no more — writing down everything you remember from memory. No notes. No slides. If you can't recall it the same day, you never learned it. Do that for two weeks and your exam scores will jump. I promise you. It sounds stupid simple. It works because it forces your brain to retrieve, not re-read.",
+        cta: "If that helped, hit like so other students find this — the algorithm is cruel to small creators. Drop your current GPA in the comments, I read every single one. Subscribe and ring the bell because next week I'm breaking down how I study for finals in 3 days. Now go run those numbers on Scholarics. I'll see you in the next one.",
+        titles: [
+          "⭐ The #1 GPA Mistake 73% of Students Make (Fix It Today)",
+          "How to Calculate Your GPA in 60 Seconds (Free Tool Inside)",
+          "I Raised My GPA 0.4 Points In One Semester — Here's How",
+        ],
+        descHook: "The one invisible GPA mistake that tanks 73% of first-semester students — and the 3 moves that fixed my 3.8.",
+        tags: "gpa, how to calculate gpa, gpa calculator, cgpa to percentage, college gpa, how to raise gpa, study tips, college tips, high school hacks, exam tips, retrieval practice, scholarics, student life, study motivation, college hacks",
+        thumbWords: ["ONE", "MISTAKE", "DESTROYS", "YOUR", "GPA", "⚠"],
+        shorts: [
+          "Your GPA dies in week one — not finals week.",
+          "Studying more hours will NOT raise your GPA — do this instead.",
+          "I used one 8-minute rule to jump my GPA 0.4 points.",
+        ],
+      }
+    : isRooted
+    ? {
+        brand: "Rooted",
+        audience: "expecting and first-time parents",
+        hook: "Your baby isn't sleeping through the night — and it's not your fault.",
+        intro: "If you've spent three dark nights bouncing a screaming newborn while Google tells you every other baby on Earth sleeps twelve hours straight, this video is for you. I'm going to give you the real reason it's happening, the one routine shift that actually works, and the lie every parenting book repeats. Stick to point three — that's the one I wish someone had told me.",
+        p1_title: "The Sleep Lie",
+        p1: "(holds up a parenting book) Every book tells you newborns 'should' sleep through the night by 8 weeks. Biologically? That's fake. Newborn stomachs are the size of a cherry at birth. They wake because they need calories, not because you're failing. The guilt stops today. The first step to fixing sleep is destroying the expectation that anything is wrong with your baby.",
+        p2_title: "The 45-Minute E.A.S.Y. Routine",
+        p2: "(cuts to whiteboard) The routine that finally saved us is called E.A.S.Y. — Eat, Activity, Sleep, You time. Full feed first, not a snack. Fifteen to twenty minutes of activity — tummy time, faces, a walk. Then swaddle and lay down drowsy but awake. And then — this is non-negotiable — you take fifteen minutes for yourself while they sleep. It sounds like a spreadsheet. It works because it removes the guesswork.",
+        p3_title: "The Drowsy-But-Awake Secret",
+        p3: "(leans in, quiet) Here's the actual secret nobody tells you until you've had three kids: 'drowsy but awake' doesn't mean asleep in your arms then transferred. It means eyes are heavy, they've stopped scanning the room, but they haven't knocked out yet. That thirty-second window is where self-soothing is built. Put them down fully asleep and you're creating a sleep prop. Hit that window and you've built a sleeper.",
+        cta: "If this calmed you down tonight, hit like — another exhausted parent needs to find this. Drop your baby's age in the comments — I reply to every single one on Wednesdays. Subscribe for the newborn series, and ring the bell. The free week-by-week sleep routine is linked in the Rooted app — link in bio. Breathe, parent. You're doing better than you think.",
+        titles: [
+          "⭐ Why Your Baby Won't Sleep (It's NOT Your Fault)",
+          "Newborn Sleep Routine That Actually Works (E.A.S.Y. Method)",
+          "Pediatricians Won't Tell You This Newborn Sleep Secret",
+        ],
+        descHook: "The real reason your newborn won't sleep — the E.A.S.Y. routine that saved us, and one 30-second window that builds a sleeper.",
+        tags: "newborn sleep, baby sleep, newborn sleep schedule, how to get baby to sleep, parenting tips, new mom, first time mom, newborn tips, baby routine, rooted parenting, gentle parenting, sleep training, newborn care, pregnancy tips, baby hacks",
+        thumbWords: ["YOUR", "BABY", "WON'T", "SLEEP", "—WHY?"],
+        shorts: [
+          "Newborns don't sleep through the night — stop believing they should.",
+          "This 4-step routine put my newborn to sleep in 7 nights.",
+          "The 30-second window that teaches a baby to self-soothe.",
+        ],
+      }
+    : {
+        brand: "NOVA",
+        audience: "ambitious creators and entrepreneurs",
+        hook: "You're one YouTube video away from changing your whole life — and you're about to miss it.",
+        intro: "If you've been posting videos that nobody watches and wondering why the algorithm keeps ignoring you, this is the video. I'm going to hand you the exact hook formula, structure, and CTA that's grown multiple channels past 100K subs. Stay to the third point — that single move doubled my views in thirty days.",
+        p1_title: "The Hook That Stops The Scroll",
+        p1: "(leans in, dead serious) The hook isn't a question. It's not 'have you ever wondered.' A real hook is a one-sentence statement that creates an open loop in the viewer's brain. It does three things: identifies a specific person, names a painful truth, and hints at a resolution in this video. If your first line doesn't do all three, re-shoot it. I don't care how good the rest is.",
+        p2_title: "The 3-Act Script Template",
+        p2: "(cuts to screen recording of a script) I use the exact same 3-minute structure every time — zero fluff. Intro hook, restated promise, then three numbered points stacked fastest-to-most-powerful, then a single-call CTA. Notice I said ONE call, not five. If you ask for a like, a sub, a comment, and a link click? They do nothing. Pick the single action you want and ask for it twice, nothing more.",
+        p3_title: "The CTR Thumbnail Rule",
+        p3: "(holds up two thumbnails) The thumbnail wins 70% of the click. Rule: no more than six words, high contrast, face with an extreme emotion. If you can't read the words on a phone screen held at arm's length, start over. The fastest-growing creators spend more time on the thumbnail than they do on the script. That should tell you everything.",
+        cta: "If this was useful, smash the like so YouTube pushes it to another creator who needs it. Drop 'HOOK' in the comments if you're going to re-shoot your intro this week. Subscribe for the full script-to-subscriber series, and ring the bell. The free hook checklist is linked in the description. Now go ship that video.",
+        titles: [
+          "⭐ How to Write a YouTube Hook That Stops the Scroll",
+          "YouTube Script Template That Got Me 100K Subs (3 Minutes)",
+          "Your Thumbnail Is The Reason Nobody Watches Your Videos",
+        ],
+        descHook: "The hook formula, 3-minute script template, and thumbnail rule that doubled my views in 30 days — copy and paste.",
+        tags: "youtube tips, how to grow on youtube, youtube script, youtube hook, get more views, youtube thumbnail, youtube algorithm, video script, content creation, grow youtube channel, youtube for beginners, content strategy, youtuber tips, video marketing, nova",
+        thumbWords: ["YOUR", "VIDEO", "GETS", "ZERO", "VIEWS"],
+        shorts: [
+          "Stop opening your videos with a question — it kills retention.",
+          "One sentence hooks 3x more viewers than any intro I've tested.",
+          "Your thumbnail matters more than your entire video.",
+        ],
+      };
+
+  const desc = `${niche.descHook}
+
+In this video I break down the exact step-by-step playbook for ${isScholarics ? "raising your GPA fast and calculating your target grades" : isRooted ? "getting your newborn to sleep without the guilt" : "writing videos that actually get watched"} — copy every piece, adapt it to your channel, and ship this week.
+
+▸ WHAT WE COVER:
+- The real problem nobody tells you
+- Exact step-by-step system you can copy
+- The one move that moves the needle fastest
+- Real examples and screen recordings
+- The exact CTA that converts views into subs
+
+▸ LINKS:
+- Free tool: https://scholarics.com
+- Related video: https://youtube.com/
+- Subscribe for weekly plays: https://youtube.com/
+
+▸ CHAPTERS:
+0:00  Intro
+0:45  ${niche.p1_title}
+1:30  ${niche.p2_title}
+2:15  ${niche.p3_title}
+2:45  Wrap-up + CTA
+
+#${isScholarics ? "gpa #studytips #collegetips #scholarics #studentlife" : isRooted ? "newborn #babysleep #parenting #rooted #newmom" : "youtube #contentcreation #creatortips #growth #novachannel"}`;
+
+  return `[YOUTUBE AGENT] ACTIVATED — Script package locked in for **${t}**. Rolling cameras, Anwaar.
+
+## ▸ HOOK (OPENING LINE)
+**"${niche.hook}"**
+Delivered straight to camera in the first 0–3 seconds. No greeting, no "what's up guys" — land the hook first, hard cut, then welcome them back.
+
+## ▸ FULL SCRIPT (≈3 MIN VIDEO)
+
+**[INTRO - 0:00]**
+*(hard look at camera, slight lean in)*
+"${niche.hook}"
+*(beat, 1 second)*
+"${niche.intro}"
+
+**[MAIN POINT 1 - 0:45]**
+**${niche.p1_title}**
+${niche.p1}
+
+**[MAIN POINT 2 - 1:30]**
+**${niche.p2_title}**
+${niche.p2}
+
+**[MAIN POINT 3 - 2:15]**
+**${niche.p3_title}**
+${niche.p3}
+
+**[CTA - 2:45]**
+${niche.cta}
+
+## ▸ TITLE OPTIONS (3)
+${niche.titles.map((tt, i) => `- ${i === 0 ? "⭐ " : ""}**${tt}**`).join("\n")}
+
+## ▸ VIDEO DESCRIPTION
+\`\`\`text
+${desc}
+\`\`\`
+
+## ▸ TAGS (15)
+\`${niche.tags}\`
+
+## ▸ THUMBNAIL TEXT
+\`\`\`
+${niche.thumbWords.join("\n")}
+\`\`\`
+*(Max 6 bold words, all caps, high-contrast on a dark-orange background. Face should show extreme emotion — shock, surprise, or 'I can't believe this' energy.)*
+
+## ▸ SHORTS HOOK VARIATIONS (3)
+${niche.shorts.map(s => `- **${s}**`).join("\n")}
+
+Package ready for upload — send it to the editor, Anwaar.`;
+}
+
+// ══════════════════════════════════════════════════
 // MAIN EXPORT
 // ══════════════════════════════════════════════════
 export default function NOVA() {
@@ -1376,8 +1594,8 @@ export default function NOVA() {
     const newMsgs=[...messages,{role:"user",content:userCmd}];
     setMessages(newMsgs);
     try {
-      // If no API key is configured, fall back to a local canned SEO demo response
-      // so Anwaar can see the report formatting immediately on-device.
+      // If no API key is configured, fall back to a local canned demo response
+      // so Anwaar can see the agent output immediately on-device.
       if (!ANTHROPIC_API_KEY && agent === "SEO AGENT") {
         const target = (userCmd.replace(/seo|audit|for|on|check|run|please|/gi, "").trim() || "scholarics.com homepage");
         const reply = buildDemoSeoReport(target);
@@ -1385,6 +1603,16 @@ export default function NOVA() {
         setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
         addFeed(agent, `SEO audit complete — ${target.slice(0,28)}`,"SUCCESS");
         addLog(`[${agent}] SEO report delivered.`);
+      } else if (!ANTHROPIC_API_KEY && agent === "YOUTUBE AGENT") {
+        const topic = userCmd
+          .replace(/youtube|script|video|shorts|hook|thumbnail|write|make|create|generate|for|please|about|on(?!t)|me/gi, " ")
+          .replace(/\s+/g, " ")
+          .trim() || "gpa tips for students";
+        const reply = buildDemoYouTubeReport(topic);
+        await new Promise(r => setTimeout(r, 1600));
+        setMessages(p=>[...p,{role:"assistant",content:reply,agent}]);
+        addFeed(agent, `Script package ready — ${topic.slice(0,26)}`, "SUCCESS");
+        addLog(`[${agent}] YouTube script package delivered.`);
       } else if (!ANTHROPIC_API_KEY) {
         await new Promise(r=>setTimeout(r,700));
         setMessages(p=>[...p,{role:"assistant",content:"[NOVA] Anthropic API key not configured. Open src/App.jsx and set ANTHROPIC_API_KEY to enable live AI responses. The SEO AGENT demo mode is available — try: \"seo audit scholarics.com\"",agent:"SYSTEM"}]);
