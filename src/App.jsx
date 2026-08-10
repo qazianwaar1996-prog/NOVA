@@ -4,7 +4,7 @@ import {
   Settings, Network, Activity, Bell, Atom, Power, ChevronRight, CodeXml, Bug, Box,
   Infinity as InfinityIcon, ShieldCheck, PenLine, PenTool, ClipboardCheck, Target, Gauge,
   Mic, Crosshair, TriangleAlert, CircleX, Aperture, Globe, Rocket, Search, FileText,
-  X, Zap, Check, Asterisk, Send, Download, Sparkles,
+  X, Zap, Check, Asterisk, Send, Download, Sparkles, History, Trash2, Clock,
 } from 'lucide-react';
 import { MAP_DOTS } from './dots.js';
 import {
@@ -19,6 +19,7 @@ const ICONS = {
   'code-xml': CodeXml, 'bug': Bug, 'box': Box, 'infinity': InfinityIcon, 'shield-check': ShieldCheck,
   'pen-line': PenLine, 'pen-tool': PenTool, 'clipboard-check': ClipboardCheck, 'target': Target,
   'gauge': Gauge, 'globe': Globe, 'rocket': Rocket, 'search': Search, 'file-text': FileText,
+  'history': History, 'clock': Clock, 'trash': Trash2,
 };
 const Ic = ({ name, size = 14, ...p }) => { const C = ICONS[name] || Box; return <C size={size} strokeWidth={1.6} {...p} />; };
 
@@ -62,6 +63,105 @@ function detectAgent(t) {
 
 // Global message history for context
 const novaHistory = [];
+
+/* ═══════════════ PERSISTENT HISTORY (localStorage) ═══════════════ */
+// Append-only ring of recent commands + their responses, capped at 50
+// entries. Persists across sessions via `localStorage` under the key
+// `nova_history` so the user can review past conversations and so
+// NOVA's API context (novaHistory, below) is seeded with recent
+// exchanges on app load.
+const HISTORY_KEY = 'nova_history';
+const MAX_HISTORY = 50;
+const RESTORE_TO_CONTEXT = 10;
+
+// In-memory copy of the persistent history. Initialized from localStorage
+// at module load. Replaced whenever a new entry is pushed.
+let _history = loadHistoryFromStorage();
+
+function loadHistoryFromStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e) => e && typeof e === 'object'
+        && typeof e.timestamp === 'number'
+        && typeof e.cmd === 'string'
+        && typeof e.response === 'string')
+      .slice(-MAX_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function saveHistoryToStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(_history));
+  } catch {
+    // Ignore quota / serialization errors — the in-memory ring still works.
+  }
+}
+
+// Pub/sub so React components re-render when the ring changes.
+const _historySubs = new Set();
+const _emitHistory = () => _historySubs.forEach((fn) => fn(_history));
+
+/* Push a completed command/response into the history. The agent name is
+   stored so the History view can show the right agent icon. */
+function pushHistoryEntry(cmd, agent, response) {
+  if (!cmd || !response) return;
+  const entry = {
+    timestamp: Date.now(),
+    cmd: String(cmd),
+    agent: String(agent || 'NOVA'),
+    response: String(response),
+  };
+  _history = [..._history, entry].slice(-MAX_HISTORY);
+  saveHistoryToStorage();
+  _emitHistory();
+}
+
+/* Remove every entry — both the in-memory ring and the localStorage key. */
+function clearHistory() {
+  _history = [];
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try { window.localStorage.removeItem(HISTORY_KEY); } catch {}
+  }
+  _emitHistory();
+}
+
+/* Seed the AI context (novaHistory) with the last N exchanges. Called
+   once at module load so NOVA "remembers" recent conversations across
+   page reloads. */
+function restoreToNovaContext() {
+  const recent = _history.slice(-RESTORE_TO_CONTEXT);
+  // Walk backwards so the oldest pair lands first and the newest is at
+  // the end (Claude expects a chronological message array).
+  for (let i = 0; i < recent.length; i++) {
+    const e = recent[i];
+    novaHistory.push({ role: 'user', content: e.cmd });
+    novaHistory.push({ role: 'assistant', content: e.response });
+  }
+}
+
+/* React hook: subscribes a component to the history ring. */
+function useNovaHistory() {
+  const [items, setItems] = useState(_history);
+  useEffect(() => {
+    const sub = (next) => setItems(next);
+    _historySubs.add(sub);
+    return () => { _historySubs.delete(sub); };
+  }, []);
+  return items;
+}
+
+// Seed the AI's context from the persisted history on module load. The
+// most recent 10 exchanges (20 messages: 10 user + 10 assistant) are
+// pushed so the next API call has conversational continuity.
+restoreToNovaContext();
 
 /* ═══════════════ WEEKLY REPORT INJECTION ═══════════════ */
 // Heuristic: does this command look like a weekly / Monday briefing ask?
@@ -2329,6 +2429,9 @@ function CommandBar() {
         text: `✓ ${summarizeCmd(reply, 70)}`,
         status: 'SUCCESS',
       });
+      // Persist to the localStorage-backed history ring so the user
+      // can review the conversation and NOVA has it on next session.
+      pushHistoryEntry(userCmd, det, reply);
     } else {
       setOutput(reply);
       pushActivity({
@@ -2338,6 +2441,7 @@ function CommandBar() {
         text: '✗ Connection interrupted. Retry.',
         status: 'FAILED',
       });
+      pushHistoryEntry(userCmd, det, reply);
     }
     setThinking(false);
   };
@@ -2450,6 +2554,9 @@ function CommandBar() {
 function DesktopNOVA() {
   const vpRef = useRef(null);
   const [activeNav, setActiveNav] = useState('dashboard');
+  // When the user picks a history entry from the Data Vault view, we
+  // store it here so we can open the response in a NOVAOutputModal.
+  const [historyEntry, setHistoryEntry] = useState(null);
 
   useEffect(() => {
     const el = vpRef.current;
@@ -2462,13 +2569,20 @@ function DesktopNOVA() {
     return () => window.removeEventListener('resize', set);
   }, []);
 
+  // Tapping the same nav item again closes the vault overlay (a tiny
+  // UX nicety so the user doesn't get stuck).
+  const handleNav = (id) => {
+    setActiveNav((prev) => (prev === id && id === 'vault' ? 'dashboard' : id));
+    if (id !== 'vault') setHistoryEntry(null);
+  };
+
   return (
     <div className="viewport" ref={vpRef}>
       <div className="design">
         <div className="backdrop grid" />
         <div className="backdrop vignette" />
         <TopBar />
-        <LeftRail activeNav={activeNav} setActiveNav={setActiveNav} />
+        <LeftRail activeNav={activeNav} setActiveNav={handleNav} />
         <Stage />
         <FeedPanel />
         <ApisPanel />
@@ -2480,6 +2594,20 @@ function DesktopNOVA() {
         <CommandBar />
         <div className="backdrop scan" />
       </div>
+      {activeNav === 'vault' && (
+        <HistoryOverlay
+          onOpen={(e) => setHistoryEntry(e)}
+          onClose={() => setActiveNav('dashboard')}
+          label="DATA VAULT"
+        />
+      )}
+      {historyEntry && (
+        <NOVAOutputModal
+          output={historyEntry.response}
+          agent={historyEntry.agent}
+          onClose={() => setHistoryEntry(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2493,6 +2621,7 @@ const MOBILE_NAV = [
   { id: 'team', target: 'mobile-team', icon: 'users', label: 'AI TEAM' },
   { id: 'projects', target: 'mobile-projects', icon: 'clipboard-list', label: 'PROJECTS' },
   { id: 'tasks', target: 'mobile-tasks', icon: 'list-todo', label: 'TASKS' },
+  { id: 'history', target: 'history', icon: 'history', label: 'HISTORY' },
   { id: 'more', target: 'mobile-apis', icon: 'settings', label: 'MORE' },
 ];
 
@@ -3001,6 +3130,7 @@ function MobileCommandConsole() {
         text: `✓ ${summarizeCmd(reply, 70)}`,
         status: 'SUCCESS',
       });
+      pushHistoryEntry(userCmd, det, reply);
     } else {
       setOutput(reply);
       pushActivity({
@@ -3010,6 +3140,7 @@ function MobileCommandConsole() {
         text: '✗ Connection interrupted. Retry.',
         status: 'FAILED',
       });
+      pushHistoryEntry(userCmd, det, reply);
     }
     setThinking(false);
     setTimeout(() => setExecuted(false), 1200);
@@ -3104,10 +3235,17 @@ function MobileNOVA() {
   const [expandedProject, setExpandedProject] = useState(null);
   const [expandedApi, setExpandedApi] = useState(null);
   const [commanderOpen, setCommanderOpen] = useState(false);
+  // History view: set to a history entry when the user taps a row in
+  // the HistoryView, so we can pop NOVAOutputModal with the response.
+  const [historyEntry, setHistoryEntry] = useState(null);
 
   const go = (nav) => {
     setActiveNav(nav.id);
-    document.getElementById(nav.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // The 'history' tab opens an overlay panel instead of scrolling
+    // to a section, so it intentionally has no `target` element.
+    if (nav.target && nav.target !== 'history') {
+      document.getElementById(nav.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   return (
@@ -3132,6 +3270,20 @@ function MobileNOVA() {
       <MobileWeeklyFab />
       <MobileBottomNav active={activeNav} onNav={go} />
       <MobileAgentModal agent={activeAgent} onClose={() => setActiveAgent(null)} />
+      {activeNav === 'history' && (
+        <HistoryOverlay
+          onOpen={(e) => setHistoryEntry(e)}
+          onClose={() => setActiveNav('home')}
+          label="COMMAND HISTORY"
+        />
+      )}
+      {historyEntry && (
+        <NOVAOutputModal
+          output={historyEntry.response}
+          agent={historyEntry.agent}
+          onClose={() => setHistoryEntry(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3177,6 +3329,7 @@ function MobileWeeklyFab() {
         text: `✓ ${summarizeCmd(reply, 60)}`,
         status: 'SUCCESS',
       });
+      pushHistoryEntry(userCmd, det, reply);
     } else {
       setOutput(reply);
       pushActivity({
@@ -3186,6 +3339,7 @@ function MobileWeeklyFab() {
         text: '✗ Connection interrupted. Retry.',
         status: 'FAILED',
       });
+      pushHistoryEntry(userCmd, det, reply);
     }
     setThinking(false);
   };
@@ -3249,6 +3403,242 @@ function MobileWeeklyFab() {
         }
       `}</style>
     </>
+  );
+}
+
+/* ═══════════════ HISTORY VIEW ═══════════════ */
+// Lists past commands + responses grouped by date (Today / Yesterday /
+// Earlier). Tapping an entry opens the full response in the standard
+// NOVAOutputModal so the same SEO / Weekly / plain renderers apply.
+// A CLEAR HISTORY button at the top wipes both the in-memory ring and
+// the localStorage copy.
+function dayBucket(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = startOfDay(now) - startOfDay(d);
+  if (diff <= 0) return 'Today';
+  if (diff <= 86400000) return 'Yesterday';
+  return 'Earlier';
+}
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function formatDateLabel(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/* Shared row — used by both the desktop and mobile variants. The
+   onClick handler is supplied by the parent (typically opens the
+   response in a NOVAOutputModal). */
+function HistoryRow({ entry, onOpen }) {
+  const preview = (entry.response || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(entry)}
+      className="history-row"
+      style={{
+        display: 'block', width: '100%', textAlign: 'left',
+        background: 'linear-gradient(180deg, rgba(255,154,38,0.06), rgba(255,154,38,0.02))',
+        border: '1px solid rgba(255,154,38,0.22)',
+        borderRadius: 4,
+        padding: '10px 12px',
+        marginBottom: 6,
+        cursor: 'pointer',
+        color: '#e8c98a',
+        fontFamily: 'var(--fb), system-ui, sans-serif',
+        transition: 'background 150ms, border-color 150ms, transform 80ms',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.14), rgba(255,154,38,0.04))';
+        e.currentTarget.style.borderColor = 'rgba(255,154,38,0.45)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,154,38,0.06), rgba(255,154,38,0.02))';
+        e.currentTarget.style.borderColor = 'rgba(255,154,38,0.22)';
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, rgba(255,154,38,0.18), rgba(16,9,3,0.6))', border: '1px solid rgba(255,154,38,0.40)', borderRadius: 4, color: ORANGE, flex: 'none' }}>
+          <Ic name={agentIconFor(entry.agent)} size={11} />
+        </span>
+        <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 1.4, color: ORANGE, fontWeight: 700 }}>{entry.agent}</span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Clock size={9} strokeWidth={1.8} /> {formatTime(entry.timestamp)}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: '#ffd9a8', fontWeight: 600, lineHeight: 1.35, wordBreak: 'break-word', marginBottom: 4 }}>
+        {entry.cmd}
+      </div>
+      <div style={{ fontSize: 10.5, color: '#9a7bff', lineHeight: 1.45, fontStyle: 'italic' }}>
+        ↳ {preview}{preview.length >= 100 ? '…' : ''}
+      </div>
+    </button>
+  );
+}
+
+function HistoryView({ onOpen, onClose, compact = false }) {
+  const items = useNovaHistory();
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  // Group by day bucket, preserving the newest-first ordering from the
+  // store. We walk backwards so the most recent entry ends up on top.
+  const groups = {};
+  const order = [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const bucket = dayBucket(items[i].timestamp);
+    if (!groups[bucket]) { groups[bucket] = []; order.push(bucket); }
+    groups[bucket].push(items[i]);
+  }
+
+  const handleClear = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      // Auto-cancel the confirm state after 4s so it doesn't stick.
+      setTimeout(() => setConfirmClear(false), 4000);
+      return;
+    }
+    clearHistory();
+    setConfirmClear(false);
+  };
+
+  return (
+    <div className="history-view" style={{
+      display: 'flex', flexDirection: 'column',
+      height: compact ? '100%' : 'auto',
+      minHeight: compact ? 0 : 360,
+      color: '#e8c98a',
+      fontFamily: 'var(--fb), system-ui, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 12, gap: 10, flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <History size={16} color={ORANGE} strokeWidth={1.8} />
+          <div>
+            <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 11, color: ORANGE, letterSpacing: 2.4, fontWeight: 700 }}>COMMAND HISTORY</div>
+            <div style={{ fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1.4, marginTop: 2 }}>
+              {items.length} of {MAX_HISTORY} entries · localStorage-backed
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={items.length === 0}
+            className={confirmClear ? 'is-confirming' : ''}
+            style={{
+              background: confirmClear
+                ? 'linear-gradient(180deg, rgba(255,106,74,0.30), rgba(255,106,74,0.10))'
+                : 'linear-gradient(180deg, rgba(255,154,38,0.12), rgba(255,154,38,0.04))',
+              border: `1px solid ${confirmClear ? 'rgba(255,106,74,0.6)' : 'rgba(255,154,38,0.40)'}`,
+              color: confirmClear ? '#ffb6a3' : ORANGE,
+              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: items.length === 0 ? 0.4 : 1,
+              padding: '6px 12px',
+              fontSize: 9, letterSpacing: 1.6, fontFamily: 'Orbitron, monospace',
+              fontWeight: 700, borderRadius: 3,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+            title={confirmClear ? 'Tap again to confirm' : 'Erase all stored history'}
+          >
+            <Trash2 size={11} strokeWidth={1.8} />
+            {confirmClear ? 'CONFIRM CLEAR' : 'CLEAR HISTORY'}
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ background: 'none', border: '1px solid rgba(255,154,38,0.30)', color: ORANGE, cursor: 'pointer', padding: '6px 10px', fontSize: 9, letterSpacing: 1.6, fontFamily: 'Orbitron, monospace', borderRadius: 3 }}
+            >
+              CLOSE
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="history-body" style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+        paddingRight: 4,
+      }}>
+        {items.length === 0 ? (
+          <div style={{
+            border: '1px dashed rgba(255,154,38,0.30)',
+            borderRadius: 4,
+            padding: '36px 16px',
+            textAlign: 'center',
+            color: '#7a5a36',
+          }}>
+            <History size={32} color="#5c452c" strokeWidth={1.2} style={{ marginBottom: 10 }} />
+            <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, letterSpacing: 1.6, marginBottom: 4 }}>NO HISTORY YET</div>
+            <div style={{ fontSize: 11, lineHeight: 1.5 }}>Send your first command to NOVA — it will appear here, and persist across sessions.</div>
+          </div>
+        ) : (
+          order.map((bucket) => (
+            <section key={bucket} style={{ marginBottom: 14 }}>
+              <div style={{
+                fontFamily: 'Orbitron, monospace', fontSize: 9, color: '#cfa875',
+                letterSpacing: 2, marginBottom: 6, paddingBottom: 4,
+                borderBottom: '1px solid rgba(255,154,38,0.16)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+              }}>
+                <span>{bucket.toUpperCase()}</span>
+                <span style={{ fontSize: 8, color: '#5c452c', letterSpacing: 1.4 }}>
+                  {groups[bucket].length} {groups[bucket].length === 1 ? 'entry' : 'entries'}
+                </span>
+              </div>
+              {groups[bucket].map((e) => (
+                <HistoryRow key={e.timestamp} entry={e} onOpen={onOpen} />
+              ))}
+            </section>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Full-screen overlay shell — used by both desktop and mobile variants
+   so the History view can sit on top of whatever is currently
+   showing. Tapping the backdrop closes. */
+function HistoryOverlay({ onOpen, onClose, label = 'COMMAND HISTORY' }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 90,
+        background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 720, maxHeight: '85vh',
+        background: 'linear-gradient(160deg, #1a0e03, #0a0500)',
+        border: '1px solid rgba(255,154,38,0.45)',
+        borderRadius: 8, padding: 20,
+        boxShadow: '0 0 40px rgba(255,130,10,0.25)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <HistoryView onOpen={onOpen} onClose={onClose} compact />
+      </div>
+    </div>
   );
 }
 
