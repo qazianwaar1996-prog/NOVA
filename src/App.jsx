@@ -1177,6 +1177,207 @@ function WeeklyReportModalBody({ output }) {
   );
 }
 
+/* ═══════════════ VOICE INPUT (Web Speech API) ═══════════════ */
+// Cross-browser SpeechRecognition handle + a React hook that drives a
+// controlled `<input>` from interim + final transcripts, plus a small
+// mic button that glows while listening.
+
+/* Resolve the constructor across vendors. The standard `SpeechRecognition`
+   is on `window` in modern Chrome / Edge; older WebKit uses the
+   `webkitSpeechRecognition` alias. */
+function getSpeechRecognitionCtor() {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+const VOICE_SUPPORTED = !!getSpeechRecognitionCtor();
+
+/* Human-friendly message for each SpeechRecognitionErrorEvent.error code.
+   Returns the error code as a fallback so the UI is never blank. */
+function voiceErrorMessage(code) {
+  switch (code) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone access denied';
+    case 'no-speech':
+      return 'No speech detected. Try again.';
+    case 'audio-capture':
+      return 'No microphone found';
+    case 'network':
+      return 'Network error. Voice requires a connection.';
+    case 'aborted':
+      return null; // user-initiated stop — not really an error
+    case 'language-not-supported':
+      return 'Language not supported';
+    default:
+      return code ? `Voice error: ${code}` : 'Voice error';
+  }
+}
+
+/* useVoiceInput
+   ─────────────
+   Hooks an input element to a SpeechRecognition session.
+
+   @param onFinal(text)   called once with the final transcript when
+                          the session ends normally. The input is also
+                          kept in sync so callers don't need to wire
+                          the value themselves.
+   @returns
+     supported   – boolean, true if the browser exposes SpeechRecognition
+     listening   – true while a session is active
+     interim     – the latest interim transcript (or '')
+     error       – human-readable error string (cleared on next start)
+     start()     – begin a new session (resets any prior error)
+     stop()      – end the active session cleanly
+   */
+function useVoiceInput({ onFinal } = {}) {
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState('');
+  const [error, setError] = useState(null);
+  const recRef = useRef(null);
+  // Keep the latest onFinal in a ref so the recognition handlers don't
+  // have to re-bind every time the parent re-renders.
+  const onFinalRef = useRef(onFinal);
+  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+
+  // Cleanup on unmount.
+  useEffect(() => () => {
+    if (recRef.current) {
+      try { recRef.current.abort(); } catch {}
+      recRef.current = null;
+    }
+  }, []);
+
+  const start = () => {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      setError('Voice not supported on this browser');
+      return false;
+    }
+    // If a session is already running, restart it (acts as a stop+start).
+    if (recRef.current) {
+      try { recRef.current.abort(); } catch {}
+      recRef.current = null;
+    }
+    setError(null);
+    setInterim('');
+    const rec = new Ctor();
+    rec.lang = 'en-US';
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+
+    let finalText = '';
+    rec.onresult = (e) => {
+      // Stitch together every result returned by the event so we never
+      // lose a piece of the sentence when the user pauses mid-utterance.
+      let interimChunk = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        const transcript = (res[0] && res[0].transcript) || '';
+        if (res.isFinal) finalText += transcript;
+        else interimChunk += transcript;
+      }
+      setInterim(interimChunk);
+      // We don't push interim into onFinal's call — the parent already
+      // sees `interim` in the hook return. Final transcript is delivered
+      // when the session ends, after the final chunks have all arrived.
+      if (finalText) {
+        recRef.current && (recRef.current._novaFinal = finalText);
+      }
+    };
+    rec.onerror = (e) => {
+      const msg = voiceErrorMessage(e.error);
+      if (msg) setError(msg);
+      setListening(false);
+    };
+    rec.onend = () => {
+      // Pull the final transcript we accumulated during onresult and
+      // hand it to the caller. If the session ended with no speech
+      // detected, onerror will have already fired and we skip the call.
+      const ft = (rec._novaFinal || '').trim();
+      setListening(false);
+      setInterim('');
+      recRef.current = null;
+      if (ft && onFinalRef.current) onFinalRef.current(ft);
+    };
+
+    try {
+      rec.start();
+      recRef.current = rec;
+      setListening(true);
+      return true;
+    } catch (err) {
+      setError(voiceErrorMessage(err && err.message) || 'Voice failed to start');
+      setListening(false);
+      recRef.current = null;
+      return false;
+    }
+  };
+
+  const stop = () => {
+    const rec = recRef.current;
+    if (!rec) return;
+    try { rec.stop(); } catch {}
+    // onend will run and reset state.
+  };
+
+  return { supported: VOICE_SUPPORTED, listening, interim, error, start, stop };
+}
+
+/* <MicButton> — small wrapper that toggles voice input and glows when
+   listening. Designed to drop into both the desktop and mobile command
+   bars. The optional `variant` prop is `'desktop' | 'mobile'` and just
+   changes the dimensions. */
+function MicButton({ voice, size = 34, variant = 'desktop' }) {
+  const { supported, listening, error, start, stop } = voice;
+  const color = listening ? '#fff1d4' : error ? '#ff6a4a' : ORANGE;
+  const ringColor = error ? 'rgba(255,106,74,0.45)' : ORANGE;
+  return (
+    <button
+      type="button"
+      className={`nova-mic ${listening ? 'is-listening' : ''} ${error ? 'is-error' : ''}`}
+      onClick={() => (listening ? stop() : start())}
+      title={
+        !supported
+          ? 'Voice not supported on this browser'
+          : listening
+            ? 'Stop listening'
+            : error
+              ? error
+              : 'Voice input'
+      }
+      aria-label={listening ? 'Stop listening' : 'Start voice input'}
+      aria-pressed={listening}
+      style={{
+        width: size, height: size,
+        background: listening
+          ? `radial-gradient(circle at center, ${ORANGE} 0%, rgba(255,154,38,0.45) 55%, rgba(255,154,38,0.05) 100%)`
+          : error
+            ? 'linear-gradient(160deg, rgba(255,106,74,0.18), rgba(255,106,74,0.04))'
+            : 'transparent',
+        border: `1px solid ${listening ? ORANGE : ringColor}`,
+        color,
+        cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 4,
+        position: 'relative',
+        boxShadow: listening
+          ? `0 0 14px rgba(255,154,38,0.55), inset 0 0 8px rgba(255,154,38,0.45)`
+          : error
+            ? '0 0 6px rgba(255,106,74,0.30)'
+            : 'none',
+        animation: listening ? 'novaMicPulse 1.1s ease-in-out infinite' : 'none',
+        transition: 'background 200ms, color 200ms, box-shadow 200ms',
+        flex: 'none',
+        padding: 0,
+      }}
+    >
+      <Mic size={variant === 'mobile' ? 17 : 15} strokeWidth={1.8} />
+    </button>
+  );
+}
+
 /* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
 function NOVAOutputModal({ output, agent, onClose }) {
   const [copied, setCopied] = useState(false);
@@ -2073,8 +2274,35 @@ function CommandBar() {
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+
+  /* Voice input. While a recognition session is live, `interim` is
+     pushed into `cmd` in real time so the user sees their words appear
+     in the input. When the session ends cleanly, the final transcript
+     stays in the input and we auto-execute. */
+  const voice = useVoiceInput({
+    onFinal: (text) => {
+      setCmd(text);
+      // Defer one frame so the final transcript is committed to state
+      // before exec() reads it.
+      requestAnimationFrame(() => exec());
+    },
+  });
+  useEffect(() => {
+    // While listening, show interim transcript in the input. When the
+    // session ends, do NOT clear the input — the `onFinal` callback
+    // already wrote the final transcript there, and any subsequent
+    // typing by the user should be preserved.
+    if (voice.listening) {
+      setCmd(voice.interim);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.interim, voice.listening]);
+
   const exec = async () => {
     if (!cmd.trim() || thinking) return;
+    // Stop any active voice session so the listening UI doesn't linger
+    // while a command is in flight.
+    if (voice.listening) voice.stop();
     const userCmd = cmd.trim();
     const det = detectAgent(userCmd);
     setAgent(det); setCmd(''); setFlash(true);
@@ -2129,15 +2357,22 @@ function CommandBar() {
             <span key={i} style={{ width: 5, height: 5, background: c, boxShadow: `0 0 6px ${c}`, opacity: .9 }} />
           ))}
         </div>
-        <div style={{ position: 'absolute', right: 246, top: 8, fontFamily: 'var(--fm)', fontSize: 7, color: 'var(--tx-faint)', letterSpacing: 1.5 }}>
-          UPLINK SECURE
+        <div style={{ position: 'absolute', right: 246, top: 8, fontFamily: 'var(--fm)', fontSize: 7, color: 'var(--tx-faint)', letterSpacing: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {voice.listening ? (
+            <span className="nova-listening-pill"><span className="dot" />LISTENING…</span>
+          ) : voice.error ? (
+            <span className="nova-voice-error" title={voice.error}>{voice.error}</span>
+          ) : (
+            <span>UPLINK SECURE</span>
+          )}
         </div>
         <input className="cmdinput" style={{ left: 24, top: 13, width: 428, height: 34 }}
-          placeholder="ENTER COMMAND..." value={cmd}
+          placeholder={voice.listening ? 'SPEAK NOW…' : 'ENTER COMMAND...'}
+          value={cmd}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && exec()} />
         <Chamfer x={468} y={12} w={34} h={34} c={6}>
-          <button className="sqbtn" title="Voice input"><Mic size={15} /></button>
+          <MicButton voice={voice} size={28} variant="desktop" />
         </Chamfer>
         <button className="execbtn" style={{ left: 512, top: 9, width: 186, height: 40, clipPath: cutPoly(8) }}
           onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
@@ -2726,8 +2961,23 @@ function MobileCommandConsole() {
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+
+  /* Voice input — same as desktop: show interim in real time, auto-exec
+     on session end. */
+  const voice = useVoiceInput({
+    onFinal: (text) => {
+      setCmd(text);
+      requestAnimationFrame(() => exec());
+    },
+  });
+  useEffect(() => {
+    if (voice.listening) setCmd(voice.interim);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.interim, voice.listening]);
+
   const exec = async () => {
     if (!cmd.trim() || thinking) return;
+    if (voice.listening) voice.stop();
     const userCmd = cmd.trim();
     const det = detectAgent(userCmd);
     setAgent(det); setCmd('');
@@ -2768,11 +3018,25 @@ function MobileCommandConsole() {
     <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>
       <div className="mobile-console-status">
         <span><i />NOVA COMMAND LINK</span>
-        <small>{executed ? 'COMMAND ACCEPTED' : 'UPLINK SECURE'}</small>
+        <small>
+          {executed
+            ? 'COMMAND ACCEPTED'
+            : voice.listening
+              ? <span className="nova-listening-pill"><span className="dot" />LISTENING…</span>
+              : voice.error
+                ? <span style={{ color: '#ffb6a3' }}>{voice.error}</span>
+                : 'UPLINK SECURE'}
+        </small>
       </div>
       <div className="mobile-console-input-row">
-        <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && exec()} placeholder="ENTER COMMAND..." aria-label="Enter command" />
-        <button type="button" className="mobile-mic" title="Voice command"><Mic size={17} /></button>
+        <input
+          value={cmd}
+          onChange={(e) => setCmd(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && exec()}
+          placeholder={voice.listening ? 'SPEAK NOW…' : 'ENTER COMMAND...'}
+          aria-label="Enter command"
+        />
+        <MicButton voice={voice} size={44} variant="mobile" />
         <button type="button" className="mobile-execute" onClick={exec} disabled={thinking}>{thinking ? 'PROCESSING...' : 'EXECUTE'}</button>
       </div>
       <div
