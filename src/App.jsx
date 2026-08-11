@@ -2198,7 +2198,7 @@ function NOVAOutputSheet({ output, agent, onClose, loading = false }) {
     setDragOffset(0);
   };
 
-  const sheetHeight = expanded ? '80vh' : '46vh';
+  const sheetHeight = expanded ? '85vh' : '46vh';
   const translateY = closing || !entered
     ? '100%'
     : dragging
@@ -2227,10 +2227,10 @@ function NOVAOutputSheet({ output, agent, onClose, loading = false }) {
         position: 'absolute', left: 0, right: 0, bottom: 0,
         width: '100%',
         height: sheetHeight,
-        // `80vh` is the requested expanded size; maxHeight gives mobile
+        // `85vh` is the requested expanded size; maxHeight gives mobile
         // browsers with dynamic toolbars a safe fallback without shrinking
         // the full-width bottom-sheet layout on desktop-sized emulators.
-        maxHeight: expanded ? '80dvh' : '46dvh',
+        maxHeight: expanded ? '85dvh' : '46dvh',
         minHeight: 0,
         background: 'linear-gradient(180deg, #1a0e03 0%, #0a0500 100%)',
         borderTop: '1px solid rgba(255,154,38,0.5)',
@@ -3183,6 +3183,8 @@ function CommandBar() {
     // while a command is in flight.
     if (voice.listening) voice.stop();
     const userCmd = commandText.trim();
+    // Haptic feedback on EXECUTE
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([50]);
     playNovaExecuteSound();
     const det = detectAgent(userCmd);
     const requestId = ++outputRequestRef.current;
@@ -3547,7 +3549,7 @@ function MobileCommanderCard({ expanded, onToggle }) {
   );
 }
 
-function MobileCoreViz({ lowEnd = false }) {
+function MobileCoreViz({ lowEnd = false, voiceMode = false, thinkingMode = false }) {
   const ticks = [];
   for (let i = 0; i < 96; i++) {
     const a = (i * 3.75) * Math.PI / 180;
@@ -3564,13 +3566,16 @@ function MobileCoreViz({ lowEnd = false }) {
   }
   const particles = useMemo(() => {
     const r = mulberry32(122);
-    const particleCount = lowEnd ? 18 : 58;
-    return Array.from({ length: particleCount }).map((_, i) => {
+    // Reduced particle count: 30 on mobile for performance, 18 on low-end
+    const particleCount = lowEnd ? 14 : 30;
+    // Extra particles during voice/thinking mode for visual feedback
+    const bonusCount = (voiceMode || thinkingMode) ? 20 : 0;
+    return Array.from({ length: particleCount + bonusCount }).map((_, i) => {
       const a = r() * Math.PI * 2;
       const dist = 48 + r() * 114;
       return { i, x: 170 + Math.cos(a) * dist, y: 170 + Math.sin(a) * dist, s: r() < .18 ? 1.8 : 1.1, o: .18 + r() * .62 };
     });
-  }, [lowEnd]);
+  }, [lowEnd, voiceMode, thinkingMode]);
   const nodes = [18, 64, 112, 160, 210, 258, 310].map((deg) => {
     const a = deg * Math.PI / 180;
     return { x: 170 + 128 * Math.cos(a), y: 170 + 128 * Math.sin(a), deg };
@@ -3633,16 +3638,39 @@ function MobileCoreViz({ lowEnd = false }) {
   );
 }
 
-function MobileCorePanel({ lowEnd = false }) {
+function MobileCorePanel({ lowEnd = false, voiceMode = false, thinkingMode = false, listeningText = '', onOrbTap }) {
+  const statusText = voiceMode ? 'LISTENING...' : thinkingMode ? 'THINKING...' : 'ONLINE';
+  const orbClass = voiceMode ? 'nova-orb-voice' : thinkingMode ? 'nova-orb-thinking' : '';
   return (
     <MobilePanel className="mobile-core-panel" c={16}>
       <div className="mobile-core-label">NOVA CORE</div>
       <div className="mobile-core-stage">
-        <MobileCoreViz lowEnd={lowEnd} />
+        <div
+          className={`mobile-core-orb-wrap ${orbClass}`}
+          onClick={onOrbTap}
+          role="button"
+          tabIndex={0}
+          aria-label={voiceMode ? 'Stop voice input' : 'Tap to speak to NOVA'}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOrbTap?.(); } }}
+        >
+          <MobileCoreViz lowEnd={lowEnd} voiceMode={voiceMode} thinkingMode={thinkingMode} />
+          {/* Ripple rings during voice mode */}
+          {voiceMode && (
+            <div className="nova-orb-ripples" aria-hidden="true">
+              <span className="nova-orb-ripple" />
+              <span className="nova-orb-ripple" style={{ animationDelay: '0.3s' }} />
+              <span className="nova-orb-ripple" style={{ animationDelay: '0.6s' }} />
+              <span className="nova-orb-ripple" style={{ animationDelay: '0.9s' }} />
+            </div>
+          )}
+        </div>
         <div className="mobile-core-title">
           <div className="n">NOVA</div>
           <div className="r">MASTER AI ORCHESTRATOR</div>
-          <div className="st"><i />ONLINE</div>
+          <div className="st"><i />{statusText}</div>
+          {voiceMode && listeningText && (
+            <div className="nova-orb-transcript">{listeningText}</div>
+          )}
         </div>
         <span className="mobile-core-readout left">AGENT BUS<br />24 ONLINE</span>
         <span className="mobile-core-readout right">CORE TEMP<br />OPTIMAL</span>
@@ -3888,24 +3916,24 @@ function MobileWorldMap() {
   );
 }
 
-function MobileCommandConsole() {
+function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking, onThinkingChange, execRef }) {
   const [cmd, setCmd] = useState('');
   const [executed, setExecuted] = useState(false);
-  const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
   const outputRequestRef = useRef(0);
 
-  /* Voice input — same as desktop: show interim in real time, auto-exec
-     on session end. */
-  const voice = useVoiceInput({
+  const thinking = externalThinking || false;
+
+  /* Voice input — always call the hook to satisfy React rules of hooks,
+     but prefer the external voice from the parent (MobileNOVA) when provided. */
+  const localVoice = useVoiceInput({
     onFinal: (text) => {
       setCmd(text);
-      // Use the final transcript as the command argument so the
-      // auto-submit cannot read stale input state.
       requestAnimationFrame(() => exec(text, { preserveInput: true }));
     },
   });
+  const voice = externalVoice || localVoice;
   useEffect(() => {
     if (voice.listening) setCmd(voice.interim);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3916,16 +3944,16 @@ function MobileCommandConsole() {
     if (!commandText.trim() || thinking) return;
     if (voice.listening) voice.stop();
     const userCmd = commandText.trim();
-    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+    // Haptic feedback on EXECUTE
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([50]);
     playNovaExecuteSound();
     const det = detectAgent(userCmd);
     const requestId = ++outputRequestRef.current;
     setAgent(det);
     if (!preserveInput) setCmd('');
-    // Mount the response sheet immediately; it will show the thinking
-    // animation until the provider returns.
     setOutput(null);
-    setExecuted(true); setThinking(true);
+    setExecuted(true);
+    if (onThinkingChange) onThinkingChange(true);
     pushActivity({
       t: nowStamp(),
       name: det,
@@ -3933,8 +3961,6 @@ function MobileCommandConsole() {
       text: `↳ ${summarizeCmd(userCmd)}`,
       status: 'PROCESSING',
     });
-    // Stream sequenced log lines into the shared console log bus (same one
-    // the desktop Command Console subscribes to).
     const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
     if (ok) {
       if (requestId === outputRequestRef.current) setOutput(reply);
@@ -3957,18 +3983,22 @@ function MobileCommandConsole() {
       });
       pushHistoryEntry(userCmd, det, reply);
     }
-    if (requestId === outputRequestRef.current) setThinking(false);
+    if (onThinkingChange) onThinkingChange(false);
     setTimeout(() => setExecuted(false), 1200);
   };
+
+  // Expose exec to parent via ref so orb voice can trigger it
+  useEffect(() => {
+    if (execRef) execRef.current = (text) => exec(text, { preserveInput: false });
+  });
+
   const closeOutput = () => {
     outputRequestRef.current += 1;
     setOutput(null);
-    setThinking(false);
+    if (onThinkingChange) onThinkingChange(false);
   };
   const handleQuickPrompt = (q) => {
     if (q.id === 'weekly-report') {
-      // The mobile WEEKLY REPORT chip runs immediately instead of only
-      // filling the command field.
       exec(q.prompt);
       return;
     }
@@ -4064,14 +4094,43 @@ function MobileNOVA({ lowEnd = false }) {
   const [expandedProject, setExpandedProject] = useState(null);
   const [expandedApi, setExpandedApi] = useState(null);
   const [commanderOpen, setCommanderOpen] = useState(false);
-  // History view: set to a history entry when the user taps a row in
-  // the HistoryView, so we can pop NOVAOutputModal with the response.
   const [historyEntry, setHistoryEntry] = useState(null);
+  const [thinking, setThinking] = useState(false);
+  const [voiceNotSupported, setVoiceNotSupported] = useState(false);
+  // Ref to the command console's exec function — set by MobileCommandConsole
+  // so the orb's voice onFinal can trigger execution.
+  const consoleExecRef = useRef(null);
+
+  // Shared voice hook — lifted here so both the orb and the command
+  // console can use the same recognition session.
+  const voice = useVoiceInput({
+    onFinal: (text) => {
+      setThinking(true);
+      // Trigger command execution in MobileCommandConsole via ref
+      requestAnimationFrame(() => {
+        if (consoleExecRef.current) {
+          consoleExecRef.current(text);
+        }
+      });
+    },
+  });
+
+  // Orb tap handler: toggle voice recognition
+  const handleOrbTap = () => {
+    if (voice.listening) {
+      voice.stop();
+      return;
+    }
+    if (!voice.supported) {
+      setVoiceNotSupported(true);
+      setTimeout(() => setVoiceNotSupported(false), 2500);
+      return;
+    }
+    voice.start();
+  };
 
   const go = (nav) => {
     setActiveNav(nav.id);
-    // The 'history' tab opens an overlay panel instead of scrolling
-    // to a section, so it intentionally has no `target` element.
     if (nav.target && nav.target !== 'history') {
       document.getElementById(nav.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -4085,7 +4144,16 @@ function MobileNOVA({ lowEnd = false }) {
       <MobileTopBar onProfile={() => setCommanderOpen((v) => !v)} />
       <main className="mobile-content" id="mobile-home">
         <MobileCommanderCard expanded={commanderOpen} onToggle={() => setCommanderOpen((v) => !v)} />
-        <MobileCorePanel lowEnd={lowEnd} />
+        <MobileCorePanel
+          lowEnd={lowEnd}
+          voiceMode={voice.listening}
+          thinkingMode={thinking}
+          listeningText={voice.interim}
+          onOrbTap={handleOrbTap}
+        />
+        {voiceNotSupported && (
+          <div className="nova-voice-unsupported-toast">VOICE NOT SUPPORTED</div>
+        )}
         <MobileMetrics />
         <MobileTeamSection onOpenAgent={setActiveAgent} />
         <MobileProjects expanded={expandedProject} onToggle={setExpandedProject} />
@@ -4095,8 +4163,12 @@ function MobileNOVA({ lowEnd = false }) {
         <MobilePerformance />
         <MobileWorldMap />
       </main>
-      <MobileCommandConsole />
-      <MobileWeeklyFab />
+      <MobileCommandConsole
+        voice={voice}
+        thinking={thinking}
+        onThinkingChange={setThinking}
+        execRef={consoleExecRef}
+      />
       <MobileBottomNav active={activeNav} onNav={go} />
       <MobileAgentModal agent={activeAgent} onClose={() => setActiveAgent(null)} />
       {activeNav === 'history' && (
@@ -4110,7 +4182,7 @@ function MobileNOVA({ lowEnd = false }) {
         <NOVAOutputModal
           output={historyEntry.response}
           agent={historyEntry.agent}
-          onClose={() => setHistoryEntry(null)}
+          onClose={() => { setHistoryEntry(null); handleThinkingDone(); }}
         />
       )}
     </div>
