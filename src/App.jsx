@@ -213,159 +213,66 @@ THIS WEEK PRIORITIES:
 
 End with: "Anything else on this, Anwaar?"`;
 
-/* ═══════════════ MULTI-AI ROUTER · API KEYS ═══════════════ */
-// Every provider key is injected at build time from Vite environment
-// variables (see `.env.example` and the GitHub Actions deploy workflow).
-// A missing/invalid key simply makes that provider throw, which the
-// routing fallback chains in sendToNOVA() handle gracefully — so one
-// down provider never breaks the whole command center.
-const KEYS = {
-  gemini: import.meta.env.VITE_GEMINI_KEY,
-  groq: import.meta.env.VITE_GROQ_KEY,
-  deepseek: import.meta.env.VITE_DEEPSEEK_KEY,
-  mistral: import.meta.env.VITE_MISTRAL_KEY,
-  cohere: import.meta.env.VITE_COHERE_KEY,
-  openrouter: import.meta.env.VITE_OPENROUTER_KEY,
-  cerebras: import.meta.env.VITE_CEREBRAS_KEY,
-  huggingface: import.meta.env.VITE_HUGGINGFACE_KEY,
-  replicate: import.meta.env.VITE_REPLICATE_KEY,
-  stability: import.meta.env.VITE_STABILITY_KEY,
-  elevenlabs: import.meta.env.VITE_ELEVENLABS_KEY,
-  tavily: import.meta.env.VITE_TAVILY_KEY,
-};
+/* ═══════════════ MULTI-AI ROUTER · CLOUDFLARE WORKER PROXY ═══════════════ */
+// All API keys live in a Cloudflare Worker's environment variables — never
+// in the client bundle. The frontend only talks to the Worker, which injects
+// the key server-side before forwarding the request to the provider. This
+// keeps secrets out of the built JavaScript (so GitHub secret scanning no
+// longer blocks the deploy).
+const WORKER_URL = 'https://nova-ai-proxy.workers.dev';
 
 /* ── Provider call helpers ──────────────────────────────────────
-   Each helper throws on a non-OK HTTP response so the routing fallback
-   chains in sendToNOVA() can advance to the next provider. On success
-   it returns the model's text reply.                              */
+   Each helper posts to the Worker proxy, which injects the API key
+   server-side and returns the provider's JSON response. On success it
+   returns the model's text reply.                                */
 
 // Gemini 2.0 Flash — best for analysis & reasoning (SEO, Analytics, Monetize).
 async function callGemini(prompt, systemPrompt) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${KEYS.gemini}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: { maxOutputTokens: 1000 },
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+  const res = await fetch(`${WORKER_URL}/gemini`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: { maxOutputTokens: 1000 }
+    })
+  });
   const data = await res.json();
   return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
 }
 
 // Groq · Llama 3.3 70B — fast, great for social posts & technical triage.
 async function callGroq(prompt, systemPrompt) {
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const res = await fetch(`${WORKER_URL}/groq`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${KEYS.groq}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
+        { role: 'user', content: prompt }
       ],
-      max_tokens: 1000,
-    }),
+      max_tokens: 1000
+    })
   });
-  if (!res.ok) throw new Error(`Groq ${res.status}`);
   const data = await res.json();
   return data.choices?.[0]?.message?.content || 'No response';
 }
 
 // Mistral Small — best for writing & multilingual markets.
 async function callMistral(prompt, systemPrompt) {
-  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+  const res = await fetch(`${WORKER_URL}/mistral`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${KEYS.mistral}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'mistral-small-latest',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
+        { role: 'user', content: prompt }
       ],
-      max_tokens: 1000,
-    }),
+      max_tokens: 1000
+    })
   });
-  if (!res.ok) throw new Error(`Mistral ${res.status}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'No response';
-}
-
-// DeepSeek — creative (YouTube scripts) & technical (Monitor diagnostics).
-async function callDeepSeek(prompt, systemPrompt) {
-  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${KEYS.deepseek}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: 1000,
-    }),
-  });
-  if (!res.ok) throw new Error(`DeepSeek ${res.status}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'No response';
-}
-
-// OpenRouter — model marketplace, ideal for brainstorming new ideas.
-async function callOpenRouter(prompt, systemPrompt) {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${KEYS.openrouter}`,
-      'HTTP-Referer': 'https://qazianwaar1996-prog.github.io/NOVA',
-      'X-Title': 'NOVA AI Operations',
-    },
-    body: JSON.stringify({
-      model: 'openrouter/auto',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: 1000,
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'No response';
-}
-
-// Cohere Command R+ — fallback for monetization analysis.
-async function callCohere(prompt, systemPrompt) {
-  const res = await fetch('https://api.cohere.ai/compatibility/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${KEYS.cohere}`,
-    },
-    body: JSON.stringify({
-      model: 'command-r-plus',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: 1000,
-    }),
-  });
-  if (!res.ok) throw new Error(`Cohere ${res.status}`);
   const data = await res.json();
   return data.choices?.[0]?.message?.content || 'No response';
 }
