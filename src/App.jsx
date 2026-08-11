@@ -4,7 +4,7 @@ import {
   Settings, Network, Activity, Bell, Atom, Power, ChevronRight, CodeXml, Bug, Box,
   Infinity as InfinityIcon, ShieldCheck, PenLine, PenTool, ClipboardCheck, Target, Gauge,
   Mic, Crosshair, TriangleAlert, CircleX, Aperture, Globe, Rocket, Search, FileText,
-  X, Zap, Check, Asterisk, Send, Download, Sparkles, History, Trash2, Clock, RefreshCw,
+  X, Zap, Check, Asterisk, Send, Download, Sparkles, History, Trash2, Clock,
 } from 'lucide-react';
 import { MAP_DOTS } from './dots.js';
 import {
@@ -4067,51 +4067,6 @@ function MobileNOVA({ lowEnd = false }) {
   // History view: set to a history entry when the user taps a row in
   // the HistoryView, so we can pop NOVAOutputModal with the response.
   const [historyEntry, setHistoryEntry] = useState(null);
-  const [pullDistance, setPullDistance] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const pullRef = useRef(null);
-  const refreshTimerRef = useRef(null);
-
-  useEffect(() => () => {
-    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-  }, []);
-
-  // A small native-feeling pull gesture for the fixed mobile scroll
-  // viewport. It only captures a downward gesture when already at scrollTop
-  // zero, so normal content scrolling remains untouched.
-  const onMobileTouchStart = (e) => {
-    if (refreshing || e.touches.length !== 1 || e.currentTarget.scrollTop > 0) return;
-    pullRef.current = { startY: e.touches[0].clientY, distance: 0 };
-  };
-  const onMobileTouchMove = (e) => {
-    const gesture = pullRef.current;
-    if (!gesture || e.touches.length !== 1) return;
-    const distance = e.touches[0].clientY - gesture.startY;
-    if (distance <= 0 || e.currentTarget.scrollTop > 0) {
-      if (distance < 0) pullRef.current = null;
-      setPullDistance(0);
-      return;
-    }
-    gesture.distance = Math.min(120, distance);
-    e.preventDefault();
-    setPullDistance(Math.min(84, distance * 0.55));
-  };
-  const onMobileTouchEnd = () => {
-    const gesture = pullRef.current;
-    if (!gesture) return;
-    pullRef.current = null;
-    if (gesture.distance >= 76) {
-      setRefreshing(true);
-      setPullDistance(76);
-      refreshTimerRef.current = setTimeout(() => window.location.reload(), 280);
-    } else {
-      setPullDistance(0);
-    }
-  };
-  const onMobileTouchCancel = () => {
-    pullRef.current = null;
-    setPullDistance(0);
-  };
 
   const go = (nav) => {
     setActiveNav(nav.id);
@@ -4123,24 +4078,7 @@ function MobileNOVA({ lowEnd = false }) {
   };
 
   return (
-    <div
-      className={`mobile-viewport ${lowEnd ? 'low-end' : ''}`}
-      onTouchStart={onMobileTouchStart}
-      onTouchMove={onMobileTouchMove}
-      onTouchEnd={onMobileTouchEnd}
-      onTouchCancel={onMobileTouchCancel}
-    >
-      <div
-        className={`mobile-refresh-indicator ${refreshing ? 'is-refreshing' : ''}`}
-        aria-hidden={!refreshing && pullDistance === 0}
-        style={{
-          opacity: refreshing ? 1 : Math.min(1, pullDistance / 48),
-          transform: `translate(-50%, ${refreshing ? 10 : pullDistance - 48}px)`,
-        }}
-      >
-        <RefreshCw size={15} strokeWidth={1.8} />
-        <span>{refreshing ? 'REFRESHING...' : pullDistance >= 76 ? 'RELEASE TO REFRESH' : 'PULL TO REFRESH'}</span>
-      </div>
+    <div className={`mobile-viewport ${lowEnd ? 'low-end' : ''}`}>
       <div className="mobile-backdrop mobile-grid" />
       <div className="mobile-backdrop mobile-vignette" />
       <div className="mobile-backdrop mobile-scan" />
