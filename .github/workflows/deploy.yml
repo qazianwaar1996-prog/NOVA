@@ -1,20 +1,41 @@
 name: Deploy NOVA
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - run: npm install
-      - run: npm run build
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_GEMINI_KEY: ${{ secrets.VITE_GEMINI_KEY }}
+          VITE_GROQ_KEY: ${{ secrets.VITE_GROQ_KEY }}
+          VITE_DEEPSEEK_KEY: ${{ secrets.VITE_DEEPSEEK_KEY }}
+          VITE_MISTRAL_KEY: ${{ secrets.VITE_MISTRAL_KEY }}
+          VITE_COHERE_KEY: ${{ secrets.VITE_COHERE_KEY }}
+          VITE_OPENROUTER_KEY: ${{ secrets.VITE_OPENROUTER_KEY }}
+          VITE_CEREBRAS_KEY: ${{ secrets.VITE_CEREBRAS_KEY }}
+          VITE_HUGGINGFACE_KEY: ${{ secrets.VITE_HUGGINGFACE_KEY }}
+          VITE_REPLICATE_KEY: ${{ secrets.VITE_REPLICATE_KEY }}
+          VITE_STABILITY_KEY: ${{ secrets.VITE_STABILITY_KEY }}
+          VITE_ELEVENLABS_KEY: ${{ secrets.VITE_ELEVENLABS_KEY }}
+          VITE_TAVILY_KEY: ${{ secrets.VITE_TAVILY_KEY }}
+
       - uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
