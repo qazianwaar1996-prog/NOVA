@@ -226,28 +226,24 @@ const WORKER_URL = "https://nova-ai-proxy.qazi-anwaar1996.workers.dev";
    server-side and returns the provider's JSON response. On success it
    returns the model's text reply.                                */
 
-// Gemini 2.0 Flash — best for analysis & reasoning (SEO, Analytics, Monetize).
 async function callGemini(prompt, systemPrompt) {
-  const res = await fetch(`${WORKER_URL}/gemini`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch("https://nova-ai-proxy.qazi-anwaar1996.workers.dev/gemini", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { maxOutputTokens: 1000 }
+      contents: [{parts: [{text: prompt}]}],
+      systemInstruction: {parts: [{text: systemPrompt}]}
     })
   });
   const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response from Gemini";
 }
 
-// Groq · Llama 3.3 70B — fast, great for social posts & technical triage.
 async function callGroq(prompt, systemPrompt) {
   const res = await fetch(`${WORKER_URL}/groq`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
@@ -259,13 +255,11 @@ async function callGroq(prompt, systemPrompt) {
   return data.choices?.[0]?.message?.content || 'No response';
 }
 
-// Mistral Small — best for writing & multilingual markets.
 async function callMistral(prompt, systemPrompt) {
   const res = await fetch(`${WORKER_URL}/mistral`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'mistral-small-latest',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
@@ -290,17 +284,17 @@ async function generateImage(prompt) {
 function modelForAgent(agent) {
   const a = (agent || '').toUpperCase();
   if (a === 'IMAGE') return 'Pollinations AI';
-  if (a.includes('SEO')) return 'Gemini 2.0 Flash';
-  if (a.includes('CONTENT')) return 'Mistral Small';
-  if (a.includes('SOCIAL')) return 'Groq · Llama 3.3 70B';
-  if (a.includes('YOUTUBE')) return 'DeepSeek';
-  if (a.includes('EMAIL')) return 'Mistral Small';
-  if (a.includes('ANALYTICS')) return 'Gemini 2.0 Flash';
-  if (a.includes('MONITOR')) return 'DeepSeek';
-  if (a.includes('IDEAS')) return 'OpenRouter';
-  if (a.includes('MARKETS')) return 'Mistral Small';
-  if (a.includes('MONETIZE')) return 'Gemini 2.0 Flash';
-  return 'Gemini 2.0 Flash';
+  if (a.includes('SEO')) return 'NOVA AI Proxy';
+  if (a.includes('CONTENT')) return 'NOVA AI Proxy';
+  if (a.includes('SOCIAL')) return 'NOVA AI Proxy';
+  if (a.includes('YOUTUBE')) return 'NOVA AI Proxy';
+  if (a.includes('EMAIL')) return 'NOVA AI Proxy';
+  if (a.includes('ANALYTICS')) return 'NOVA AI Proxy';
+  if (a.includes('MONITOR')) return 'NOVA AI Proxy';
+  if (a.includes('IDEAS')) return 'NOVA AI Proxy';
+  if (a.includes('MARKETS')) return 'NOVA AI Proxy';
+  if (a.includes('MONETIZE')) return 'NOVA AI Proxy';
+  return 'NOVA AI Proxy';
 }
 
 /* ═══════════════ MAIN ROUTER · sendToNOVA ═══════════════ */
