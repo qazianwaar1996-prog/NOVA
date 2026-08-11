@@ -1582,84 +1582,251 @@ function MicButton({ voice, size = 34, variant = 'desktop' }) {
   );
 }
 
-/* ═══════════════ NOVA OUTPUT MODAL ═══════════════ */
-function NOVAOutputModal({ output, agent, onClose }) {
-  const [copied, setCopied] = useState(false);
+/* ═══════════════ NOVA RESPONSE FORMATTER ═══════════════ */
+// Markdown-lite renderer for NOVA responses. Handles:
+//   ### heading       → orange bold header
+//   ## heading        → larger orange header (single # treated the same)
+//   - item / * item   → bullet point with glowing orange dot
+//   1. item           → numbered list item
+//   ``` lang ... ```  → dark code block, monospace
+//   `inline`          → inline monospace chip
+//   **bold**          → bold highlight
+//   ![alt](url)       → rendered inline image (IMAGE AGENT outputs)
+
+const FMT_INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!\[[^\]]*\]\(https?:\/\/[^)\s]+\))/g;
+const FMT_IMG_RE = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/;
+const FMT_FENCE_RE = /```([a-zA-Z0-9_+#.-]*)\n?([\s\S]*?)```/g;
+
+const fmtH2Style = {
+  fontFamily: 'Orbitron, monospace',
+  fontSize: 16, fontWeight: 800, letterSpacing: 1.4,
+  color: ORANGE, textShadow: '0 0 12px rgba(255,154,38,0.45)',
+  margin: '16px 0 8px', lineHeight: 1.35, wordBreak: 'break-word',
+};
+const fmtH3Style = {
+  fontFamily: 'Orbitron, monospace',
+  fontSize: 12.5, fontWeight: 700, letterSpacing: 1.2,
+  color: ORANGE, margin: '13px 0 6px', lineHeight: 1.4, wordBreak: 'break-word',
+};
+const fmtCodeBlockStyle = {
+  margin: 0,
+  background: 'rgba(0,0,0,0.68)',
+  border: '1px solid rgba(255,154,38,0.28)',
+  borderLeft: '3px solid rgba(255,154,38,0.55)',
+  borderRadius: 6, padding: '12px 14px',
+  fontFamily: MONO, fontSize: 11.5, lineHeight: 1.6,
+  color: '#ffd9a8', overflowX: 'auto', whiteSpace: 'pre',
+};
+
+/* Render inline marks (code chips, bold, images) inside a single line. */
+function renderInline(line, keyBase) {
+  const nodes = [];
+  let last = 0; let m; let n = 0;
+  FMT_INLINE_RE.lastIndex = 0;
+  while ((m = FMT_INLINE_RE.exec(line)) !== null) {
+    if (m.index > last) {
+      nodes.push(<React.Fragment key={`${keyBase}-t${n++}`}>{line.slice(last, m.index)}</React.Fragment>);
+    }
+    if (m[1]) {
+      nodes.push(
+        <code key={`${keyBase}-c${n++}`} style={{
+          background: 'rgba(255,154,38,0.12)',
+          border: '1px solid rgba(255,154,38,0.25)',
+          borderRadius: 3, padding: '1px 5px',
+          fontFamily: MONO, fontSize: '0.92em', color: '#ffc24d',
+          wordBreak: 'break-word',
+        }}>{m[1].slice(1, -1)}</code>
+      );
+    } else if (m[2]) {
+      nodes.push(
+        <strong key={`${keyBase}-b${n++}`} style={{ color: '#ffd9a8', fontWeight: 700 }}>{m[2].slice(2, -2)}</strong>
+      );
+    } else if (m[3]) {
+      const img = m[3].match(FMT_IMG_RE);
+      nodes.push(
+        <span key={`${keyBase}-i${n++}`} style={{ display: 'block', margin: '10px 0', textAlign: 'center' }}>
+          <img src={img[2]} alt={img[1]} loading="lazy" style={{
+            maxWidth: '100%', borderRadius: 6,
+            border: '1px solid rgba(255,154,38,0.4)',
+            boxShadow: '0 0 18px rgba(255,130,10,0.25)',
+          }} />
+        </span>
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) {
+    nodes.push(<React.Fragment key={`${keyBase}-t${n++}`}>{line.slice(last)}</React.Fragment>);
+  }
+  return nodes;
+}
+
+/* Walk the lines of a (non-code) text chunk and emit formatted blocks:
+   headers, bullet lists, numbered lists, and paragraphs. */
+function renderFormattedLines(text, keyBase) {
+  const lines = String(text).split(/\r?\n/);
+  const out = [];
+  let i = 0; let k = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    // Blank line → paragraph break
+    if (!line) { i++; continue; }
+
+    let m;
+    // ### → orange bold header
+    if ((m = line.match(/^#{3,}\s*(.+)$/))) {
+      out.push(<div key={`${keyBase}-h3-${k++}`} style={fmtH3Style}>{renderInline(m[1], `${keyBase}-h3x${k}`)}</div>);
+      i++; continue;
+    }
+    // ## (or a lone #) → larger orange header
+    if ((m = line.match(/^#{1,2}\s+(.+)$/))) {
+      out.push(<div key={`${keyBase}-h2-${k++}`} style={fmtH2Style}>{renderInline(m[1], `${keyBase}-h2x${k}`)}</div>);
+      i++; continue;
+    }
+    // - / * / • → bullet points with orange dot (group consecutive runs)
+    if (/^[-*•]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const bm = lines[i].trim().match(/^[-*•]\s+(.+)$/);
+        if (!bm) break;
+        items.push(bm[1]);
+        i++;
+      }
+      const key = `${keyBase}-ul-${k++}`;
+      out.push(
+        <div key={key} role="list" style={{ margin: '6px 0 10px' }}>
+          {items.map((it, j) => (
+            <div role="listitem" key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '3px 0' }}>
+              <span aria-hidden="true" style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: ORANGE, boxShadow: `0 0 6px ${ORANGE}`,
+                flex: 'none', marginTop: 7,
+              }} />
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{renderInline(it, `${key}-${j}`)}</span>
+            </div>
+          ))}
+        </div>
+      );
+      continue;
+    }
+    // 1. / 2) → numbered list items (group consecutive runs)
+    if (/^\d+[.)]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const nm = lines[i].trim().match(/^\d+[.)]\s+(.+)$/);
+        if (!nm) break;
+        items.push(nm[1]);
+        i++;
+      }
+      const key = `${keyBase}-ol-${k++}`;
+      out.push(
+        <div key={key} role="list" style={{ margin: '6px 0 10px' }}>
+          {items.map((it, j) => (
+            <div role="listitem" key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '3px 0' }}>
+              <span style={{
+                flex: 'none', minWidth: 20, textAlign: 'right',
+                fontFamily: MONO, fontSize: 11, fontWeight: 700,
+                color: ORANGE, marginTop: 1,
+              }}>{String(j + 1).padStart(2, '0')}</span>
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{renderInline(it, `${key}-${j}`)}</span>
+            </div>
+          ))}
+        </div>
+      );
+      continue;
+    }
+    // Plain paragraph line
+    out.push(
+      <p key={`${keyBase}-p-${k++}`} style={{ margin: '0 0 8px', lineHeight: 1.65, wordBreak: 'break-word' }}>
+        {renderInline(line, `${keyBase}-px${k}`)}
+      </p>
+    );
+    i++;
+  }
+  return out;
+}
+
+/* Full response renderer: first carves out fenced ``` code blocks, then
+   formats each remaining text chunk line-by-line. */
+function renderNovaText(text) {
+  if (!text) return null;
+  const segments = [];
+  let last = 0; let m;
+  FMT_FENCE_RE.lastIndex = 0;
+  while ((m = FMT_FENCE_RE.exec(text)) !== null) {
+    if (m.index > last) segments.push({ type: 'text', value: text.slice(last, m.index) });
+    segments.push({ type: 'code', lang: (m[1] || '').trim(), value: m[2].replace(/\n$/, '') });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) segments.push({ type: 'text', value: text.slice(last) });
+
+  return segments.map((seg, i) => {
+    if (seg.type === 'code') {
+      return (
+        <div key={`seg-${i}`} style={{ position: 'relative', margin: '10px 0' }}>
+          {seg.lang && (
+            <span style={{
+              position: 'absolute', top: 7, right: 10,
+              fontFamily: MONO, fontSize: 8, letterSpacing: 1.6,
+              color: '#7a5a36', textTransform: 'uppercase', pointerEvents: 'none',
+            }}>{seg.lang}</span>
+          )}
+          <pre style={fmtCodeBlockStyle}>{seg.value}</pre>
+        </div>
+      );
+    }
+    return <React.Fragment key={`seg-${i}`}>{renderFormattedLines(seg.value, `seg${i}`)}</React.Fragment>;
+  });
+}
+
+/* ═══════════════ NOVA OUTPUT MODAL / BOTTOM SHEET ═══════════════ */
+// Shared content body for the output panel: optional raw-error debug block
+// plus the right renderer (weekly report / SEO structured / formatted text).
+function NOVAOutputContent({ output, agent, seoMode, weeklyMode }) {
+  return (
+    <div style={{ fontFamily: 'monospace', fontSize: 12.5, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
+      {/* TEMPORARY DEBUG: if the response contains "Error:", surface the
+          raw error verbatim at the top so we can see exactly which API
+          is failing and why. Remove once API keys are confirmed. */}
+      {typeof output === 'string' && /Error:/i.test(output) && (
+        <div style={{
+          marginBottom: 12, padding: '10px 12px',
+          background: 'rgba(255,74,74,0.12)',
+          border: '1px solid rgba(255,74,74,0.55)',
+          borderRadius: 4,
+          fontFamily: 'Share Tech Mono, monospace',
+          fontSize: 11,
+          color: '#ffb4a8',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}>
+          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 2, color: '#ff6a4a', marginBottom: 6 }}>
+            ⚠ RAW API ERROR (debug)
+          </div>
+          {output}
+        </div>
+      )}
+      {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderNovaText(output)}
+    </div>
+  );
+}
+
+/* Desktop: centered, scrollable dialog. Closes on backdrop click or Esc. */
+function NOVAOutputDesktopModal({ output, agent, onClose }) {
   const [copiedAll, setCopiedAll] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   if (!output) return null;
 
-  // Render text with light formatting: code blocks (```...```) become styled blocks;
-  // blank lines become paragraph breaks. Everything else preserves newlines.
-  const renderFormatted = (text) => {
-    if (!text) return null;
-    const segments = [];
-    const re = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
-    let lastIndex = 0;
-    let m;
-    let key = 0;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > lastIndex) {
-        segments.push({ type: 'text', value: text.slice(lastIndex, m.index) });
-      }
-      segments.push({ type: 'code', lang: m[1] || '', value: m[2] });
-      lastIndex = m.index + m[0].length;
-    }
-    if (lastIndex < text.length) segments.push({ type: 'text', value: text.slice(lastIndex) });
+  const seoMode = isSeoResponse(agent, output);
+  const weeklyMode = parseWeeklyReport(output) !== null;
 
-    return segments.map((seg, i) => {
-      if (seg.type === 'code') {
-        return (
-          <pre key={i} style={{
-            background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,154,38,0.25)',
-            borderRadius: '4px', padding: '10px 12px', margin: '8px 0',
-            fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
-            color: '#ffd9a8', overflowX: 'auto', whiteSpace: 'pre',
-          }}>{seg.value}</pre>
-        );
-      }
-      // text segment — render markdown images inline (![alt](url)) and
-      // convert blank-line groups into paragraph breaks. This is what
-      // makes the IMAGE AGENT's generated picture actually show up.
-      const renderRichText = (text, baseKey) => {
-        const nodes = [];
-        const re = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
-        let last = 0; let m; let n = 0;
-        const pushText = (chunk) => {
-          if (!chunk) return;
-          chunk.split('\n').forEach((line, k, arr) => {
-            nodes.push(<React.Fragment key={`${baseKey}-t${n++}`}>{line}</React.Fragment>);
-            if (k < arr.length - 1) nodes.push(<br key={`${baseKey}-b${n++}`} />);
-          });
-        };
-        while ((m = re.exec(text)) !== null) {
-          pushText(text.slice(last, m.index));
-          nodes.push(
-            <span key={`${baseKey}-img${n++}`} style={{ display: 'block', margin: '10px 0', textAlign: 'center' }}>
-              <img src={m[2]} alt={m[1]} loading="lazy"
-                style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid rgba(255,154,38,0.4)', boxShadow: '0 0 18px rgba(255,130,10,0.25)' }} />
-            </span>
-          );
-          last = m.index + m[0].length;
-        }
-        pushText(text.slice(last));
-        return nodes;
-      };
-      const paras = seg.value.split(/\n{2,}/);
-      return paras.map((p, j) => (
-        <p key={`${i}-${j}`} style={{ margin: '0 0 8px 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {renderRichText(p, `${i}-${j}`)}
-        </p>
-      ));
-    });
-  };
-
-  const copy = async () => {
-    const ok = await copyToClipboard(output);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
-  };
   const copyAll = async () => {
     const ok = await copyToClipboard(output);
     if (ok) {
@@ -1667,12 +1834,6 @@ function NOVAOutputModal({ output, agent, onClose }) {
       setTimeout(() => setCopiedAll(false), 1500);
     }
   };
-
-  const seoMode = isSeoResponse(agent, output);
-  // Weekly report mode triggers if the response actually parses into a
-  // weekly report shape. We don't gate on the prompt keywords because the
-  // agent name (e.g. "ANALYTICS") is too narrow a signal.
-  const weeklyMode = parseWeeklyReport(output) !== null;
 
   return (
     <div style={{
@@ -1700,41 +1861,230 @@ function NOVAOutputModal({ output, agent, onClose }) {
             <button onClick={copyAll} style={{ ...btnStyle, color: copiedAll ? '#35e08a' : ORANGE }} title="Copy full response">
               {copiedAll ? '✓ COPIED ALL' : '⎘ COPY ALL'}
             </button>
-            <button onClick={copy} style={{ ...btnStyle, color: copied ? '#35e08a' : ORANGE }}>
-              {copied ? 'COPIED' : 'COPY'}
-            </button>
             <button onClick={onClose} style={btnStyle}>CLOSE</button>
           </div>
         </div>
-        <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
-          {/* TEMPORARY DEBUG: if the response contains "Error:", surface the
-              raw error verbatim at the top so we can see exactly which API
-              is failing and why. Remove once API keys are confirmed. */}
-          {typeof output === 'string' && /Error:/i.test(output) && (
-            <div style={{
-              marginBottom: 12, padding: '10px 12px',
-              background: 'rgba(255,74,74,0.12)',
-              border: '1px solid rgba(255,74,74,0.55)',
-              borderRadius: 4,
-              fontFamily: 'Share Tech Mono, monospace',
-              fontSize: 11,
-              color: '#ffb4a8',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 2, color: '#ff6a4a', marginBottom: 6 }}>
-                ⚠ RAW API ERROR (debug)
-              </div>
-              {output}
-            </div>
-          )}
-          {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderFormatted(output)}
+        <NOVAOutputContent output={output} agent={agent} seoMode={seoMode} weeklyMode={weeklyMode} />
+      </div>
+    </div>
+  );
+}
+
+/* Mobile: full-screen bottom sheet that slides up from the bottom.
+   - 80% of screen height when expanded, ~46% peek when collapsed
+   - drag handle: tap to expand/collapse, drag down to close
+   - scrollable body for long responses
+   - tapping the backdrop closes it too                              */
+function NOVAOutputSheet({ output, agent, onClose }) {
+  const [entered, setEntered] = useState(false);   // drives slide-up entrance
+  const [expanded, setExpanded] = useState(true);  // opens fully expanded
+  const [dragOffset, setDragOffset] = useState(0); // live drag translation
+  const [dragging, setDragging] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
+  const dragInfo = useRef(null);
+
+  // Slide in after mount + lock background scroll while open.
+  useEffect(() => {
+    const t = setTimeout(() => setEntered(true), 25);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t);
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  if (!output) return null;
+
+  const seoMode = isSeoResponse(agent, output);
+  const weeklyMode = parseWeeklyReport(output) !== null;
+
+  /* Animated close: slide back down, then unmount. */
+  const close = () => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(onClose, 300);
+  };
+
+  const copyAll = async () => {
+    const ok = await copyToClipboard(output);
+    if (ok) {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    }
+  };
+
+  /* ── Drag handle gestures (pointer events cover touch + mouse) ── */
+  const onHandlePointerDown = (e) => {
+    dragInfo.current = { startY: e.clientY, moved: false };
+    setDragging(true);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+  const onHandlePointerMove = (e) => {
+    const info = dragInfo.current;
+    if (!info) return;
+    const dy = e.clientY - info.startY;
+    if (Math.abs(dy) > 6) info.moved = true;
+    // Downward drag translates the sheet 1:1; upward drag is rubber-banded.
+    setDragOffset(dy > 0 ? dy : dy * 0.12);
+  };
+  const onHandlePointerUp = (e) => {
+    const info = dragInfo.current;
+    if (!info) return;
+    const dy = e.clientY - info.startY;
+    const moved = info.moved;
+    dragInfo.current = null;
+    setDragging(false);
+    setDragOffset(0);
+    if (dy > 90) { close(); return; }              // drag down → close
+    if (!moved) { setExpanded((v) => !v); return; } // tap → expand/collapse
+    if (dy < -30) setExpanded(true);                // drag up → expand
+    else if (dy > 30) setExpanded(false);           // small drag down → collapse
+  };
+  const onHandlePointerCancel = () => {
+    dragInfo.current = null;
+    setDragging(false);
+    setDragOffset(0);
+  };
+
+  const sheetHeight = expanded ? '80vh' : '46vh';
+  const translateY = closing || !entered
+    ? '100%'
+    : dragging
+      ? `${Math.max(0, dragOffset)}px`
+      : '0%';
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 999 }}>
+      {/* Backdrop — tapping outside the sheet closes it */}
+      <div
+        onClick={close}
+        style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(0,0,0,0.68)', backdropFilter: 'blur(4px)',
+          opacity: entered && !closing ? 1 : 0,
+          transition: 'opacity 260ms ease',
+        }}
+      />
+      {/* Sheet */}
+      <div role="dialog" aria-modal="true" aria-label={`${agent} output`} style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0,
+        height: sheetHeight,
+        background: 'linear-gradient(180deg, #1a0e03 0%, #0a0500 100%)',
+        borderTop: '1px solid rgba(255,154,38,0.5)',
+        borderRadius: '18px 18px 0 0',
+        boxShadow: '0 -8px 40px rgba(255,130,10,0.22), 0 -2px 12px rgba(0,0,0,0.6)',
+        transform: `translateY(${translateY})`,
+        transition: dragging
+          ? 'none'
+          : 'transform 300ms cubic-bezier(0.32,0.72,0.35,1), height 300ms cubic-bezier(0.32,0.72,0.35,1)',
+        display: 'flex', flexDirection: 'column',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        willChange: 'transform, height',
+      }}>
+        {/* Drag handle */}
+        <div
+          onPointerDown={onHandlePointerDown}
+          onPointerMove={onHandlePointerMove}
+          onPointerUp={onHandlePointerUp}
+          onPointerCancel={onHandlePointerCancel}
+          role="button"
+          aria-label={expanded ? 'Collapse or drag down to close' : 'Expand or drag down to close'}
+          style={{
+            flex: 'none',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            padding: '12px 16px 8px',
+            cursor: 'grab', touchAction: 'none', userSelect: 'none',
+          }}
+        >
+          <span style={{
+            width: 48, height: 5, borderRadius: 999,
+            background: 'rgba(255,154,38,0.55)',
+            boxShadow: '0 0 8px rgba(255,154,38,0.35)',
+          }} />
+          <span style={{
+            marginTop: 5,
+            fontFamily: 'var(--fm)', fontSize: 7.5, letterSpacing: 1.6,
+            color: '#7a5a36', textTransform: 'uppercase',
+          }}>
+            {expanded ? 'tap to collapse · drag down to close' : 'tap to expand · drag down to close'}
+          </span>
+        </div>
+
+        {/* Header: agent title + COPY ALL + close */}
+        <div style={{
+          flex: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 8, padding: '0 14px 10px',
+          borderBottom: '1px solid rgba(255,154,38,0.18)',
+        }}>
+          <div style={{
+            minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontFamily: 'Orbitron, monospace', fontSize: 10, color: ORANGE, letterSpacing: 1.6,
+          }}>
+            ⚡ {agent} — OUTPUT
+            <span style={{ color: '#9a7bff', marginLeft: 6, fontWeight: 400 }}>· {modelForAgent(agent)}</span>
+            {weeklyMode && <span style={{ color: '#ff9a26', marginLeft: 6 }}>· BRIEFING</span>}
+            {!weeklyMode && seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
+            <button
+              type="button"
+              onClick={copyAll}
+              title="Copy full response"
+              style={{
+                ...btnStyle,
+                color: copiedAll ? '#35e08a' : ORANGE,
+                padding: '6px 10px', fontSize: 9,
+              }}
+            >{copiedAll ? '✓ COPIED' : '⎘ COPY ALL'}</button>
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Close"
+              style={{
+                ...btnStyle,
+                padding: '6px 8px',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            ><X size={13} strokeWidth={2} /></button>
+          </div>
+        </div>
+
+        {/* Scrollable response body */}
+        <div style={{
+          flex: 1, minHeight: 0,
+          overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          padding: '14px 16px 26px',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255,154,38,0.4) transparent',
+        }}>
+          <NOVAOutputContent output={output} agent={agent} seoMode={seoMode} weeklyMode={weeklyMode} />
+          <div style={{
+            marginTop: 20, paddingTop: 10,
+            borderTop: '1px dashed rgba(255,154,38,0.16)',
+            textAlign: 'center',
+            fontFamily: 'var(--fm)', fontSize: 8, letterSpacing: 1.6, color: '#5c452c',
+          }}>
+            END OF RESPONSE · DRAG HANDLE DOWN OR TAP OUTSIDE TO CLOSE
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+/* Entry point — bottom sheet on mobile, centered dialog on desktop. */
+function NOVAOutputModal(props) {
+  const isMobile = useIsMobile();
+  return isMobile
+    ? <NOVAOutputSheet {...props} />
+    : <NOVAOutputDesktopModal {...props} />;
+}
 
 /* deterministic PRNG helpers */
 function mulberry32(a) {
