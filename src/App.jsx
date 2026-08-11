@@ -232,7 +232,10 @@ async function callGemini(prompt, systemPrompt) {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       contents: [{parts: [{text: prompt}]}],
-      systemInstruction: {parts: [{text: systemPrompt}]}
+      systemInstruction: {parts: [{text: systemPrompt}]},
+      // Keep the first answer fast enough for the command-center UI. The
+      // Worker forwards this Gemini generationConfig unchanged.
+      generationConfig: { maxOutputTokens: 800 }
     })
   });
   const data = await res.json();
@@ -1798,9 +1801,109 @@ function renderNovaText(text) {
 }
 
 /* ═══════════════ NOVA OUTPUT MODAL / BOTTOM SHEET ═══════════════ */
+// The waiting state lives inside the same output panel as the final answer,
+// so opening the panel never waits for the network request to finish.
+function NOVAThinkingState() {
+  const bars = [22, 34, 48, 30, 58, 39, 70, 46, 62, 32, 54, 42, 66, 30, 50, 38, 60, 28, 46, 34, 56, 26];
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="NOVA is thinking"
+      style={{
+        minHeight: 220,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 18,
+        padding: '26px 14px 30px',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{
+        width: 62,
+        height: 62,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: '50%',
+        border: '1px solid rgba(255,154,38,0.48)',
+        background: 'radial-gradient(circle, rgba(255,154,38,0.24), rgba(255,154,38,0.03) 62%, transparent 70%)',
+        boxShadow: '0 0 22px rgba(255,154,38,0.28), inset 0 0 16px rgba(255,154,38,0.14)',
+        animation: 'novaThinkingPulse 1.7s ease-in-out infinite',
+      }}>
+        <Sparkles size={24} color={ORANGE} strokeWidth={1.6} />
+      </div>
+      <div>
+        <div style={{
+          color: ORANGE,
+          fontFamily: 'Orbitron, monospace',
+          fontSize: 13,
+          fontWeight: 800,
+          letterSpacing: 1.8,
+          textShadow: '0 0 12px rgba(255,154,38,0.52)',
+          animation: 'novaThinkingPulse 1.7s ease-in-out infinite',
+        }}>
+          NOVA is thinking<span aria-hidden="true" style={{ display: 'inline-block', width: 22, textAlign: 'left' }}>...</span>
+        </div>
+        <div style={{
+          marginTop: 7,
+          color: '#9a7bff',
+          fontFamily: MONO,
+          fontSize: 9,
+          letterSpacing: 1.5,
+        }}>
+          PROCESSING REQUEST · UPLINK ACTIVE
+        </div>
+      </div>
+      <div
+        aria-hidden="true"
+        style={{
+          width: 'min(100%, 270px)',
+          height: 42,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          padding: '0 10px',
+          borderTop: '1px solid rgba(255,154,38,0.16)',
+          borderBottom: '1px solid rgba(255,154,38,0.16)',
+          background: 'rgba(0,0,0,0.24)',
+        }}
+      >
+        {bars.map((height, i) => (
+          <span
+            key={i}
+            style={{
+              width: 3,
+              height: `${height}%`,
+              minHeight: 7,
+              maxHeight: 31,
+              borderRadius: 2,
+              background: 'linear-gradient(180deg, #ffd28a, #ff8b16)',
+              boxShadow: '0 0 6px rgba(255,154,38,0.48)',
+              transformOrigin: 'center',
+              animation: `novaThinkingWave 900ms ease-in-out infinite ${i * 45}ms`,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{
+        color: '#7a5a36',
+        fontFamily: MONO,
+        fontSize: 8,
+        letterSpacing: 1.4,
+      }}>
+        GENERATING RESPONSE
+      </div>
+    </div>
+  );
+}
+
 // Shared content body for the output panel: optional raw-error debug block
 // plus the right renderer (weekly report / SEO structured / formatted text).
-function NOVAOutputContent({ output, agent, seoMode, weeklyMode }) {
+function NOVAOutputContent({ output, agent, seoMode, weeklyMode, loading = false }) {
   return (
     <div style={{
       fontFamily: 'var(--fb), system-ui, sans-serif',
@@ -1809,34 +1912,57 @@ function NOVAOutputContent({ output, agent, seoMode, weeklyMode }) {
       lineHeight: 1.7,
       wordBreak: 'break-word',
     }}>
-      {/* TEMPORARY DEBUG: if the response contains "Error:", surface the
-          raw error verbatim at the top so we can see exactly which API
-          is failing and why. Remove once API keys are confirmed. */}
-      {typeof output === 'string' && /Error:/i.test(output) && (
-        <div style={{
-          marginBottom: 12, padding: '10px 12px',
-          background: 'rgba(255,74,74,0.12)',
-          border: '1px solid rgba(255,74,74,0.55)',
-          borderRadius: 4,
-          fontFamily: 'Share Tech Mono, monospace',
-          fontSize: 11,
-          color: '#ffb4a8',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}>
-          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 2, color: '#ff6a4a', marginBottom: 6 }}>
-            ⚠ RAW API ERROR (debug)
-          </div>
-          {output}
+      <style>{`
+        @keyframes novaThinkingPulse {
+          0%, 100% { opacity: .62; transform: scale(.98); }
+          50% { opacity: 1; transform: scale(1.03); }
+        }
+        @keyframes novaThinkingWave {
+          0%, 100% { opacity: .35; transform: scaleY(.34); }
+          50% { opacity: 1; transform: scaleY(1); }
+        }
+        @keyframes novaResponseFadeIn {
+          from { opacity: 0; transform: translateY(7px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      {loading ? (
+        <NOVAThinkingState />
+      ) : output ? (
+        <div
+          key={`nova-response-${output}`}
+          style={{ animation: 'novaResponseFadeIn 420ms ease-out both' }}
+        >
+          {/* TEMPORARY DEBUG: if the response contains "Error:", surface the
+              raw error verbatim at the top so we can see exactly which API
+              is failing and why. */}
+          {typeof output === 'string' && /Error:/i.test(output) && (
+            <div style={{
+              marginBottom: 12, padding: '10px 12px',
+              background: 'rgba(255,74,74,0.12)',
+              border: '1px solid rgba(255,74,74,0.55)',
+              borderRadius: 4,
+              fontFamily: 'Share Tech Mono, monospace',
+              fontSize: 11,
+              color: '#ffb4a8',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, letterSpacing: 2, color: '#ff6a4a', marginBottom: 6 }}>
+                ⚠ RAW API ERROR (debug)
+              </div>
+              {output}
+            </div>
+          )}
+          {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderNovaText(output)}
         </div>
-      )}
-      {weeklyMode ? <WeeklyReportModalBody output={output} /> : seoMode ? <SEOModalBody output={output} /> : renderNovaText(output)}
+      ) : null}
     </div>
   );
 }
 
 /* Desktop: centered, scrollable dialog. Closes on backdrop click or Esc. */
-function NOVAOutputDesktopModal({ output, agent, onClose }) {
+function NOVAOutputDesktopModal({ output, agent, onClose, loading = false }) {
   const [copiedAll, setCopiedAll] = useState(false);
 
   useEffect(() => {
@@ -1845,12 +1971,13 @@ function NOVAOutputDesktopModal({ output, agent, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  if (!output) return null;
+  if (!output && !loading) return null;
 
-  const seoMode = isSeoResponse(agent, output);
-  const weeklyMode = parseWeeklyReport(output) !== null;
+  const seoMode = !loading && isSeoResponse(agent, output);
+  const weeklyMode = !loading && parseWeeklyReport(output) !== null;
 
   const copyAll = async () => {
+    if (loading || !output) return;
     const ok = await copyToClipboard(output);
     if (ok) {
       setCopiedAll(true);
@@ -1879,15 +2006,21 @@ function NOVAOutputDesktopModal({ output, agent, onClose }) {
             <span style={{ color: '#9a7bff', marginLeft: 6, fontWeight: 400 }}>· powered by {modelForAgent(agent)}</span>
             {weeklyMode && <span style={{ color: '#ff9a26', marginLeft: 6 }}>· MONDAY BRIEFING</span>}
             {!weeklyMode && seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO STRUCTURED</span>}
+            {loading && <span style={{ color: ORANGE, marginLeft: 6 }}>· PROCESSING</span>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button onClick={copyAll} style={{ ...btnStyle, color: copiedAll ? '#35e08a' : ORANGE }} title="Copy full response">
+            <button
+              onClick={copyAll}
+              disabled={loading || !output}
+              style={{ ...btnStyle, color: copiedAll ? '#35e08a' : ORANGE, opacity: loading ? 0.5 : 1 }}
+              title={loading ? 'Waiting for NOVA response' : 'Copy full response'}
+            >
               {copiedAll ? '✓ COPIED ALL' : '⎘ COPY ALL'}
             </button>
             <button onClick={onClose} style={btnStyle}>CLOSE</button>
           </div>
         </div>
-        <NOVAOutputContent output={output} agent={agent} seoMode={seoMode} weeklyMode={weeklyMode} />
+        <NOVAOutputContent output={output} agent={agent} seoMode={seoMode} weeklyMode={weeklyMode} loading={loading} />
       </div>
     </div>
   );
@@ -1898,7 +2031,7 @@ function NOVAOutputDesktopModal({ output, agent, onClose }) {
    - drag handle: tap to expand/collapse, drag down to close
    - scrollable body for long responses
    - tapping the backdrop closes it too                              */
-function NOVAOutputSheet({ output, agent, onClose }) {
+function NOVAOutputSheet({ output, agent, onClose, loading = false }) {
   const [entered, setEntered] = useState(false);   // drives slide-up entrance
   const [expanded, setExpanded] = useState(true);  // opens fully expanded
   const [dragOffset, setDragOffset] = useState(0); // live drag translation
@@ -1908,6 +2041,10 @@ function NOVAOutputSheet({ output, agent, onClose }) {
   const dragInfo = useRef(null);
   const closingRef = useRef(false);
   const closeTimerRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  // Keep the delayed close callback current without rebinding the body-lock
+  // effect every time the parent changes loading/output state.
+  onCloseRef.current = onClose;
 
   /* Animated close: slide back down, then unmount. A ref prevents a second
      backdrop tap or Escape press from scheduling another unmount callback
@@ -1916,7 +2053,7 @@ function NOVAOutputSheet({ output, agent, onClose }) {
     if (closingRef.current) return;
     closingRef.current = true;
     setClosing(true);
-    closeTimerRef.current = setTimeout(onClose, 300);
+    closeTimerRef.current = setTimeout(() => onCloseRef.current(), 300);
   };
 
   // Slide in after mount + lock background scroll while open. The inner
@@ -1938,15 +2075,15 @@ function NOVAOutputSheet({ output, agent, onClose }) {
     };
     // `close` intentionally uses refs so this listener is not rebound for
     // every render while the copy button or drag gesture updates state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose]);
+  }, []);
 
-  if (!output) return null;
+  if (!output && !loading) return null;
 
-  const seoMode = isSeoResponse(agent, output);
-  const weeklyMode = parseWeeklyReport(output) !== null;
+  const seoMode = !loading && isSeoResponse(agent, output);
+  const weeklyMode = !loading && parseWeeklyReport(output) !== null;
 
   const copyAll = async () => {
+    if (loading || !output) return;
     const ok = await copyToClipboard(output);
     if (ok) {
       setCopiedAll(true);
@@ -2087,15 +2224,18 @@ function NOVAOutputSheet({ output, agent, onClose }) {
             <span style={{ color: '#9a7bff', marginLeft: 6, fontWeight: 400 }}>· {modelForAgent(agent)}</span>
             {weeklyMode && <span style={{ color: '#ff9a26', marginLeft: 6 }}>· BRIEFING</span>}
             {!weeklyMode && seoMode && <span style={{ color: '#35e08a', marginLeft: 6 }}>· SEO</span>}
+            {loading && <span style={{ color: ORANGE, marginLeft: 6 }}>· PROCESSING</span>}
           </div>
           <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
             <button
               type="button"
               onClick={copyAll}
-              title="Copy full response"
+              disabled={loading || !output}
+              title={loading ? 'Waiting for NOVA response' : 'Copy full response'}
               style={{
                 ...btnStyle,
                 color: copiedAll ? '#35e08a' : ORANGE,
+                opacity: loading ? 0.5 : 1,
                 padding: '6px 10px', fontSize: 9,
               }}
             >{copiedAll ? '✓ COPIED ALL' : '⎘ COPY ALL'}</button>
@@ -2125,7 +2265,7 @@ function NOVAOutputSheet({ output, agent, onClose }) {
           scrollbarWidth: 'thin',
           scrollbarColor: 'rgba(255,154,38,0.4) transparent',
         }}>
-          <NOVAOutputContent output={output} agent={agent} seoMode={seoMode} weeklyMode={weeklyMode} />
+          <NOVAOutputContent output={output} agent={agent} seoMode={seoMode} weeklyMode={weeklyMode} loading={loading} />
           <div style={{
             marginTop: 20, paddingTop: 10,
             borderTop: '1px dashed rgba(255,154,38,0.16)',
@@ -2933,6 +3073,7 @@ function CommandBar() {
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+  const outputRequestRef = useRef(0);
 
   /* Voice input. While a recognition session is live, `interim` is
      pushed into `cmd` in real time so the user sees their words appear
@@ -2964,8 +3105,12 @@ function CommandBar() {
     if (voice.listening) voice.stop();
     const userCmd = cmd.trim();
     const det = detectAgent(userCmd);
+    const requestId = ++outputRequestRef.current;
     setAgent(det); setCmd(''); setFlash(true);
     setTimeout(() => setFlash(false), 480);
+    // Open the output panel before the network call starts so the user gets
+    // immediate feedback instead of waiting for the first response byte.
+    setOutput(null);
     setThinking(true);
     // push a PROCESSING entry to the live activity feed
     pushActivity({
@@ -2979,7 +3124,7 @@ function CommandBar() {
     // the Command Console panel while the API call runs.
     const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
     if (ok) {
-      setOutput(reply);
+      if (requestId === outputRequestRef.current) setOutput(reply);
       // follow-up entry with the result summary
       pushActivity({
         t: nowStamp(),
@@ -2992,7 +3137,7 @@ function CommandBar() {
       // can review the conversation and NOVA has it on next session.
       pushHistoryEntry(userCmd, det, reply);
     } else {
-      setOutput(reply);
+      if (requestId === outputRequestRef.current) setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -3002,6 +3147,13 @@ function CommandBar() {
       });
       pushHistoryEntry(userCmd, det, reply);
     }
+    if (requestId === outputRequestRef.current) setThinking(false);
+  };
+  const closeOutput = () => {
+    // Invalidate a request whose panel was dismissed so its late response
+    // cannot reopen the modal after the user starts a new command.
+    outputRequestRef.current += 1;
+    setOutput(null);
     setThinking(false);
   };
   return (
@@ -3104,7 +3256,7 @@ function CommandBar() {
         ))}
       </div>
 
-      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
+      {(output || thinking) && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
     </>
   );
 }
@@ -3649,6 +3801,7 @@ function MobileCommandConsole() {
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+  const outputRequestRef = useRef(0);
 
   /* Voice input — same as desktop: show interim in real time, auto-exec
      on session end. */
@@ -3668,7 +3821,11 @@ function MobileCommandConsole() {
     if (voice.listening) voice.stop();
     const userCmd = cmd.trim();
     const det = detectAgent(userCmd);
+    const requestId = ++outputRequestRef.current;
     setAgent(det); setCmd('');
+    // Mount the response sheet immediately; it will show the thinking
+    // animation until the provider returns.
+    setOutput(null);
     setExecuted(true); setThinking(true);
     pushActivity({
       t: nowStamp(),
@@ -3681,7 +3838,7 @@ function MobileCommandConsole() {
     // the desktop Command Console subscribes to).
     const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
     if (ok) {
-      setOutput(reply);
+      if (requestId === outputRequestRef.current) setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -3691,7 +3848,7 @@ function MobileCommandConsole() {
       });
       pushHistoryEntry(userCmd, det, reply);
     } else {
-      setOutput(reply);
+      if (requestId === outputRequestRef.current) setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -3701,8 +3858,13 @@ function MobileCommandConsole() {
       });
       pushHistoryEntry(userCmd, det, reply);
     }
-    setThinking(false);
+    if (requestId === outputRequestRef.current) setThinking(false);
     setTimeout(() => setExecuted(false), 1200);
+  };
+  const closeOutput = () => {
+    outputRequestRef.current += 1;
+    setOutput(null);
+    setThinking(false);
   };
   return (
     <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>
@@ -3770,7 +3932,7 @@ function MobileCommandConsole() {
           </button>
         ))}
       </div>
-      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
+      {(output || thinking) && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
     </div>
   );
 }
@@ -3857,6 +4019,7 @@ function MobileWeeklyFab() {
   const [pulse, setPulse] = useState(true);
   const [output, setOutput] = useState(null);
   const [agent, setAgent] = useState('NOVA');
+  const outputRequestRef = useRef(0);
 
   // Soft attention pulse stops once the user has triggered it once so
   // the FAB doesn't keep nagging. Re-enables on a fresh page load.
@@ -3869,7 +4032,9 @@ function MobileWeeklyFab() {
     if (thinking) return;
     const userCmd = 'weekly report';
     const det = 'ANALYTICS';
+    const requestId = ++outputRequestRef.current;
     setAgent(det);
+    setOutput(null);
     setThinking(true);
     pushActivity({
       t: nowStamp(),
@@ -3880,7 +4045,7 @@ function MobileWeeklyFab() {
     });
     const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
     if (ok) {
-      setOutput(reply);
+      if (requestId === outputRequestRef.current) setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -3890,7 +4055,7 @@ function MobileWeeklyFab() {
       });
       pushHistoryEntry(userCmd, det, reply);
     } else {
-      setOutput(reply);
+      if (requestId === outputRequestRef.current) setOutput(reply);
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -3900,6 +4065,11 @@ function MobileWeeklyFab() {
       });
       pushHistoryEntry(userCmd, det, reply);
     }
+    if (requestId === outputRequestRef.current) setThinking(false);
+  };
+  const closeOutput = () => {
+    outputRequestRef.current += 1;
+    setOutput(null);
     setThinking(false);
   };
 
@@ -3954,7 +4124,7 @@ function MobileWeeklyFab() {
           </>
         )}
       </button>
-      {output && <NOVAOutputModal output={output} agent={agent} onClose={() => setOutput(null)} />}
+      {(output || thinking) && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
       <style>{`
         @keyframes novaFabPulse {
           0%, 100% { box-shadow: 0 0 22px rgba(255,154,38,0.55), 0 0 6px rgba(255,194,77,0.85), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -2px 6px rgba(0,0,0,0.25); }

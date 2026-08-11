@@ -28,11 +28,21 @@ export default {
 
     if (path === '/gemini') {
 
+      // Forward the Gemini request fields explicitly, including
+      // generationConfig.maxOutputTokens from the client. Keeping this
+      // object intact lets the frontend tune response length without
+      // exposing the API key or accidentally dropping generation settings.
+      const geminiBody = {
+        contents: body.contents,
+        systemInstruction: body.systemInstruction,
+        ...(body.generationConfig ? { generationConfig: body.generationConfig } : {}),
+      };
+
       const res = await fetch(
 
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_KEY}`,
 
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiBody) }
 
       );
 
