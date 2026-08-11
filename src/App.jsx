@@ -219,7 +219,7 @@ End with: "Anything else on this, Anwaar?"`;
 // the key server-side before forwarding the request to the provider. This
 // keeps secrets out of the built JavaScript (so GitHub secret scanning no
 // longer blocks the deploy).
-const WORKER_URL = 'https://nova-ai-proxy.workers.dev';
+const WORKER_URL = "https://nova-ai-proxy.qazi-anwaar1996.workers.dev";
 
 /* ── Provider call helpers ──────────────────────────────────────
    Each helper posts to the Worker proxy, which injects the API key
