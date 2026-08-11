@@ -1411,7 +1411,7 @@ function voiceErrorMessage(code) {
   switch (code) {
     case 'not-allowed':
     case 'service-not-allowed':
-      return 'Microphone access denied';
+      return 'Please allow microphone access';
     case 'no-speech':
       return 'No speech detected. Try again.';
     case 'audio-capture':
@@ -1464,7 +1464,7 @@ function useVoiceInput({ onFinal } = {}) {
   const start = () => {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) {
-      setError('Voice not supported on this browser');
+      setError('Voice not available on this browser');
       return false;
     }
     // If a session is already running, restart it (acts as a stop+start).
@@ -1553,7 +1553,7 @@ function MicButton({ voice, size = 34, variant = 'desktop' }) {
       onClick={() => (listening ? stop() : start())}
       title={
         !supported
-          ? 'Voice not supported on this browser'
+          ? 'Voice not available on this browser'
           : listening
             ? 'Stop listening'
             : error
@@ -3082,9 +3082,9 @@ function CommandBar() {
   const voice = useVoiceInput({
     onFinal: (text) => {
       setCmd(text);
-      // Defer one frame so the final transcript is committed to state
-      // before exec() reads it.
-      requestAnimationFrame(() => exec());
+      // Pass the transcript directly; waiting for React state to commit
+      // before calling exec() can otherwise execute the previous input.
+      requestAnimationFrame(() => exec(text, { preserveInput: true }));
     },
   });
   useEffect(() => {
@@ -3098,15 +3098,18 @@ function CommandBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.interim, voice.listening]);
 
-  const exec = async () => {
-    if (!cmd.trim() || thinking) return;
+  const exec = async (command = cmd, { preserveInput = false } = {}) => {
+    const commandText = typeof command === 'string' ? command : cmd;
+    if (!commandText.trim() || thinking) return;
     // Stop any active voice session so the listening UI doesn't linger
     // while a command is in flight.
     if (voice.listening) voice.stop();
-    const userCmd = cmd.trim();
+    const userCmd = commandText.trim();
     const det = detectAgent(userCmd);
     const requestId = ++outputRequestRef.current;
-    setAgent(det); setCmd(''); setFlash(true);
+    setAgent(det);
+    if (!preserveInput) setCmd('');
+    setFlash(true);
     setTimeout(() => setFlash(false), 480);
     // Open the output panel before the network call starts so the user gets
     // immediate feedback instead of waiting for the first response byte.
@@ -3174,7 +3177,7 @@ function CommandBar() {
         </div>
         <div style={{ position: 'absolute', right: 246, top: 8, fontFamily: 'var(--fm)', fontSize: 7, color: 'var(--tx-faint)', letterSpacing: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
           {voice.listening ? (
-            <span className="nova-listening-pill"><span className="dot" />LISTENING…</span>
+            <span className="nova-listening-pill"><span className="dot" />LISTENING...</span>
           ) : voice.error ? (
             <span className="nova-voice-error" title={voice.error}>{voice.error}</span>
           ) : (
@@ -3182,7 +3185,7 @@ function CommandBar() {
           )}
         </div>
         <input className="cmdinput" style={{ left: 24, top: 13, width: 428, height: 34 }}
-          placeholder={voice.listening ? 'SPEAK NOW…' : 'ENTER COMMAND...'}
+          placeholder={voice.listening ? 'LISTENING...' : voice.error || 'ENTER COMMAND...'}
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && exec()} />
@@ -3808,7 +3811,9 @@ function MobileCommandConsole() {
   const voice = useVoiceInput({
     onFinal: (text) => {
       setCmd(text);
-      requestAnimationFrame(() => exec());
+      // Use the final transcript as the command argument so the
+      // auto-submit cannot read stale input state.
+      requestAnimationFrame(() => exec(text, { preserveInput: true }));
     },
   });
   useEffect(() => {
@@ -3816,13 +3821,15 @@ function MobileCommandConsole() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.interim, voice.listening]);
 
-  const exec = async () => {
-    if (!cmd.trim() || thinking) return;
+  const exec = async (command = cmd, { preserveInput = false } = {}) => {
+    const commandText = typeof command === 'string' ? command : cmd;
+    if (!commandText.trim() || thinking) return;
     if (voice.listening) voice.stop();
-    const userCmd = cmd.trim();
+    const userCmd = commandText.trim();
     const det = detectAgent(userCmd);
     const requestId = ++outputRequestRef.current;
-    setAgent(det); setCmd('');
+    setAgent(det);
+    if (!preserveInput) setCmd('');
     // Mount the response sheet immediately; it will show the thinking
     // animation until the provider returns.
     setOutput(null);
@@ -3874,7 +3881,7 @@ function MobileCommandConsole() {
           {executed
             ? 'COMMAND ACCEPTED'
             : voice.listening
-              ? <span className="nova-listening-pill"><span className="dot" />LISTENING…</span>
+              ? <span className="nova-listening-pill"><span className="dot" />LISTENING...</span>
               : voice.error
                 ? <span style={{ color: '#ffb6a3' }}>{voice.error}</span>
                 : 'UPLINK SECURE'}
@@ -3885,7 +3892,7 @@ function MobileCommandConsole() {
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && exec()}
-          placeholder={voice.listening ? 'SPEAK NOW…' : 'ENTER COMMAND...'}
+          placeholder={voice.listening ? 'LISTENING...' : voice.error || 'ENTER COMMAND...'}
           aria-label="Enter command"
         />
         <MicButton voice={voice} size={44} variant="mobile" />
