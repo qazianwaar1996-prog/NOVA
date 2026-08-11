@@ -4,7 +4,7 @@ import {
   Settings, Network, Activity, Bell, Atom, Power, ChevronRight, CodeXml, Bug, Box,
   Infinity as InfinityIcon, ShieldCheck, PenLine, PenTool, ClipboardCheck, Target, Gauge,
   Mic, Crosshair, TriangleAlert, CircleX, Aperture, Globe, Rocket, Search, FileText,
-  X, Zap, Check, Asterisk, Send, Download, Sparkles, History, Trash2, Clock,
+  X, Zap, Check, Asterisk, Send, Download, Sparkles, History, Trash2, Clock, RefreshCw,
 } from 'lucide-react';
 import { MAP_DOTS } from './dots.js';
 import {
@@ -72,8 +72,15 @@ const novaHistory = [];
 // NOVA's API context (novaHistory, below) is seeded with recent
 // exchanges on app load.
 const HISTORY_KEY = 'nova_history';
+const RECENT_RESPONSES_KEY = 'nova_recent_responses';
 const MAX_HISTORY = 50;
+const MAX_RECENT_RESPONSES = 5;
 const RESTORE_TO_CONTEXT = 10;
+
+const isHistoryEntry = (e) => e && typeof e === 'object'
+  && typeof e.timestamp === 'number'
+  && typeof e.cmd === 'string'
+  && typeof e.response === 'string';
 
 // In-memory copy of the persistent history. Initialized from localStorage
 // at module load. Replaced whenever a new entry is pushed.
@@ -83,17 +90,48 @@ function loadHistoryFromStorage() {
   if (typeof window === 'undefined' || !window.localStorage) return [];
   try {
     const raw = window.localStorage.getItem(HISTORY_KEY);
+    if (!raw) return loadRecentResponsesFromStorage();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return loadRecentResponsesFromStorage();
+    return parsed.filter(isHistoryEntry).slice(-MAX_HISTORY);
+  } catch {
+    return loadRecentResponsesFromStorage();
+  }
+}
+
+// Keep a small, dedicated cache as well as the full command history. This
+// makes the most recent five responses cheap to restore even when older
+// history has grown large, and keeps the cache intentionally bounded.
+function loadRecentResponsesFromStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_RESPONSES_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((e) => e && typeof e === 'object'
-        && typeof e.timestamp === 'number'
-        && typeof e.cmd === 'string'
-        && typeof e.response === 'string')
-      .slice(-MAX_HISTORY);
+    return Array.isArray(parsed) ? parsed.filter(isHistoryEntry).slice(-MAX_RECENT_RESPONSES) : [];
   } catch {
     return [];
+  }
+}
+
+let _recentResponses = loadRecentResponsesFromStorage();
+if (_recentResponses.length === 0 && _history.length > 0) {
+  _recentResponses = _history.slice(-MAX_RECENT_RESPONSES);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(RECENT_RESPONSES_KEY, JSON.stringify(_recentResponses));
+    }
+  } catch {
+    // Ignore storage failures; the full in-memory history is still available.
+  }
+}
+
+function saveRecentResponsesToStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(RECENT_RESPONSES_KEY, JSON.stringify(_recentResponses));
+  } catch {
+    // Ignore quota / serialization errors — the main history ring still works.
   }
 }
 
@@ -121,15 +159,21 @@ function pushHistoryEntry(cmd, agent, response) {
     response: String(response),
   };
   _history = [..._history, entry].slice(-MAX_HISTORY);
+  _recentResponses = [..._recentResponses, entry].slice(-MAX_RECENT_RESPONSES);
   saveHistoryToStorage();
+  saveRecentResponsesToStorage();
   _emitHistory();
 }
 
 /* Remove every entry — both the in-memory ring and the localStorage key. */
 function clearHistory() {
   _history = [];
+  _recentResponses = [];
   if (typeof window !== 'undefined' && window.localStorage) {
-    try { window.localStorage.removeItem(HISTORY_KEY); } catch {}
+    try {
+      window.localStorage.removeItem(HISTORY_KEY);
+      window.localStorage.removeItem(RECENT_RESPONSES_KEY);
+    } catch {}
   }
   _emitHistory();
 }
@@ -389,6 +433,36 @@ function useNovaConsole() {
 
 /* Sleep helper for sequenced log lines. */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* A tiny, user-gesture-friendly command acknowledgement. It creates one
+   reusable AudioContext and short-lived oscillator nodes instead of loading
+   an audio asset or keeping a stream open. */
+let _novaAudioContext = null;
+function playNovaExecuteSound() {
+  if (typeof window === 'undefined') return;
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return;
+  try {
+    if (!_novaAudioContext) _novaAudioContext = new AudioContextCtor();
+    const ctx = _novaAudioContext;
+    const start = ctx.currentTime;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(620, start);
+    oscillator.frequency.exponentialRampToValueAtTime(880, start + 0.08);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.045, start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.13);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(start);
+    oscillator.stop(start + 0.14);
+  } catch {
+    // Audio is enhancement only; a blocked audio context must not affect EXECUTE.
+  }
+}
 
 /* Stream a sequenced set of log lines for a single command. Each call emits
    the same six lines (in the user-specified order, with 300ms gaps) and then
@@ -2579,6 +2653,10 @@ function ChamferFrame({ size, c = 5, children }) {
   );
 }
 
+const LOW_END_DEVICE = typeof navigator !== 'undefined'
+  && typeof navigator.hardwareConcurrency === 'number'
+  && navigator.hardwareConcurrency < 4;
+
 function StageStars() {
   const stars = useMemo(() => {
     const r = mulberry32(41);
@@ -3105,6 +3183,7 @@ function CommandBar() {
     // while a command is in flight.
     if (voice.listening) voice.stop();
     const userCmd = commandText.trim();
+    playNovaExecuteSound();
     const det = detectAgent(userCmd);
     const requestId = ++outputRequestRef.current;
     setAgent(det);
@@ -3158,6 +3237,16 @@ function CommandBar() {
     outputRequestRef.current += 1;
     setOutput(null);
     setThinking(false);
+  };
+  const handleQuickPrompt = (q) => {
+    if (q.id === 'weekly-report') {
+      // WEEKLY REPORT is an action, not just a prompt suggestion.
+      exec(q.prompt);
+      return;
+    }
+    setCmd(q.prompt);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 380);
   };
   return (
     <>
@@ -3225,7 +3314,7 @@ function CommandBar() {
             key={q.id}
             type="button"
             title={q.prompt}
-            onClick={() => { setCmd(q.prompt); setFlash(true); setTimeout(() => setFlash(false), 380); }}
+            onClick={() => handleQuickPrompt(q)}
             className="quick-chip"
             style={{
               flex: 'none',
@@ -3458,7 +3547,7 @@ function MobileCommanderCard({ expanded, onToggle }) {
   );
 }
 
-function MobileCoreViz() {
+function MobileCoreViz({ lowEnd = false }) {
   const ticks = [];
   for (let i = 0; i < 96; i++) {
     const a = (i * 3.75) * Math.PI / 180;
@@ -3475,12 +3564,13 @@ function MobileCoreViz() {
   }
   const particles = useMemo(() => {
     const r = mulberry32(122);
-    return Array.from({ length: 58 }).map((_, i) => {
+    const particleCount = lowEnd ? 18 : 58;
+    return Array.from({ length: particleCount }).map((_, i) => {
       const a = r() * Math.PI * 2;
       const dist = 48 + r() * 114;
       return { i, x: 170 + Math.cos(a) * dist, y: 170 + Math.sin(a) * dist, s: r() < .18 ? 1.8 : 1.1, o: .18 + r() * .62 };
     });
-  }, []);
+  }, [lowEnd]);
   const nodes = [18, 64, 112, 160, 210, 258, 310].map((deg) => {
     const a = deg * Math.PI / 180;
     return { x: 170 + 128 * Math.cos(a), y: 170 + 128 * Math.sin(a), deg };
@@ -3543,12 +3633,12 @@ function MobileCoreViz() {
   );
 }
 
-function MobileCorePanel() {
+function MobileCorePanel({ lowEnd = false }) {
   return (
     <MobilePanel className="mobile-core-panel" c={16}>
       <div className="mobile-core-label">NOVA CORE</div>
       <div className="mobile-core-stage">
-        <MobileCoreViz />
+        <MobileCoreViz lowEnd={lowEnd} />
         <div className="mobile-core-title">
           <div className="n">NOVA</div>
           <div className="r">MASTER AI ORCHESTRATOR</div>
@@ -3826,6 +3916,8 @@ function MobileCommandConsole() {
     if (!commandText.trim() || thinking) return;
     if (voice.listening) voice.stop();
     const userCmd = commandText.trim();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+    playNovaExecuteSound();
     const det = detectAgent(userCmd);
     const requestId = ++outputRequestRef.current;
     setAgent(det);
@@ -3873,6 +3965,15 @@ function MobileCommandConsole() {
     setOutput(null);
     setThinking(false);
   };
+  const handleQuickPrompt = (q) => {
+    if (q.id === 'weekly-report') {
+      // The mobile WEEKLY REPORT chip runs immediately instead of only
+      // filling the command field.
+      exec(q.prompt);
+      return;
+    }
+    setCmd(q.prompt);
+  };
   return (
     <div className={`mobile-command-console ${executed ? 'executed' : ''}`}>
       <div className="mobile-console-status">
@@ -3918,7 +4019,7 @@ function MobileCommandConsole() {
             key={q.id}
             type="button"
             title={q.prompt}
-            onClick={() => setCmd(q.prompt)}
+            onClick={() => handleQuickPrompt(q)}
             style={{
               flex: 'none',
               height: 22, padding: '0 9px',
@@ -3957,7 +4058,7 @@ function MobileBottomNav({ active, onNav }) {
   );
 }
 
-function MobileNOVA() {
+function MobileNOVA({ lowEnd = false }) {
   const [activeNav, setActiveNav] = useState('home');
   const [activeAgent, setActiveAgent] = useState(null);
   const [expandedProject, setExpandedProject] = useState(null);
@@ -3966,6 +4067,51 @@ function MobileNOVA() {
   // History view: set to a history entry when the user taps a row in
   // the HistoryView, so we can pop NOVAOutputModal with the response.
   const [historyEntry, setHistoryEntry] = useState(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const pullRef = useRef(null);
+  const refreshTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+  }, []);
+
+  // A small native-feeling pull gesture for the fixed mobile scroll
+  // viewport. It only captures a downward gesture when already at scrollTop
+  // zero, so normal content scrolling remains untouched.
+  const onMobileTouchStart = (e) => {
+    if (refreshing || e.touches.length !== 1 || e.currentTarget.scrollTop > 0) return;
+    pullRef.current = { startY: e.touches[0].clientY, distance: 0 };
+  };
+  const onMobileTouchMove = (e) => {
+    const gesture = pullRef.current;
+    if (!gesture || e.touches.length !== 1) return;
+    const distance = e.touches[0].clientY - gesture.startY;
+    if (distance <= 0 || e.currentTarget.scrollTop > 0) {
+      if (distance < 0) pullRef.current = null;
+      setPullDistance(0);
+      return;
+    }
+    gesture.distance = Math.min(120, distance);
+    e.preventDefault();
+    setPullDistance(Math.min(84, distance * 0.55));
+  };
+  const onMobileTouchEnd = () => {
+    const gesture = pullRef.current;
+    if (!gesture) return;
+    pullRef.current = null;
+    if (gesture.distance >= 76) {
+      setRefreshing(true);
+      setPullDistance(76);
+      refreshTimerRef.current = setTimeout(() => window.location.reload(), 280);
+    } else {
+      setPullDistance(0);
+    }
+  };
+  const onMobileTouchCancel = () => {
+    pullRef.current = null;
+    setPullDistance(0);
+  };
 
   const go = (nav) => {
     setActiveNav(nav.id);
@@ -3977,14 +4123,31 @@ function MobileNOVA() {
   };
 
   return (
-    <div className="mobile-viewport">
+    <div
+      className={`mobile-viewport ${lowEnd ? 'low-end' : ''}`}
+      onTouchStart={onMobileTouchStart}
+      onTouchMove={onMobileTouchMove}
+      onTouchEnd={onMobileTouchEnd}
+      onTouchCancel={onMobileTouchCancel}
+    >
+      <div
+        className={`mobile-refresh-indicator ${refreshing ? 'is-refreshing' : ''}`}
+        aria-hidden={!refreshing && pullDistance === 0}
+        style={{
+          opacity: refreshing ? 1 : Math.min(1, pullDistance / 48),
+          transform: `translate(-50%, ${refreshing ? 10 : pullDistance - 48}px)`,
+        }}
+      >
+        <RefreshCw size={15} strokeWidth={1.8} />
+        <span>{refreshing ? 'REFRESHING...' : pullDistance >= 76 ? 'RELEASE TO REFRESH' : 'PULL TO REFRESH'}</span>
+      </div>
       <div className="mobile-backdrop mobile-grid" />
       <div className="mobile-backdrop mobile-vignette" />
       <div className="mobile-backdrop mobile-scan" />
       <MobileTopBar onProfile={() => setCommanderOpen((v) => !v)} />
       <main className="mobile-content" id="mobile-home">
         <MobileCommanderCard expanded={commanderOpen} onToggle={() => setCommanderOpen((v) => !v)} />
-        <MobileCorePanel />
+        <MobileCorePanel lowEnd={lowEnd} />
         <MobileMetrics />
         <MobileTeamSection onOpenAgent={setActiveAgent} />
         <MobileProjects expanded={expandedProject} onToggle={setExpandedProject} />
@@ -4266,7 +4429,7 @@ function HistoryView({ onOpen, onClose, compact = false }) {
           <div>
             <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 11, color: ORANGE, letterSpacing: 2.4, fontWeight: 700 }}>COMMAND HISTORY</div>
             <div style={{ fontFamily: 'var(--fm)', fontSize: 8.5, color: '#7a5a36', letterSpacing: 1.4, marginTop: 2 }}>
-              {items.length} of {MAX_HISTORY} entries · localStorage-backed
+              {items.length} of {MAX_HISTORY} entries · {Math.min(items.length, MAX_RECENT_RESPONSES)} recent cached locally
             </div>
           </div>
         </div>
@@ -4378,6 +4541,36 @@ function HistoryOverlay({ onOpen, onClose, label = 'COMMAND HISTORY' }) {
   );
 }
 
+function AppLoadingSkeleton() {
+  const bars = [34, 58, 42, 76, 50, 68, 38];
+  return (
+    <div className="app-loading-shell" role="status" aria-live="polite" aria-label="Loading NOVA">
+      <div className="app-loading-card">
+        <div className="app-loading-emblem" aria-hidden="true"><span /><span /><span /></div>
+        <div className="app-loading-brand">NOVA</div>
+        <div className="app-loading-subtitle">AI OPERATIONS COMMAND CENTER</div>
+        <div className="app-loading-bars" aria-hidden="true">
+          {bars.map((height, i) => (
+            <i key={i} style={{ height: `${height}%`, animationDelay: `${i * 80}ms` }} />
+          ))}
+        </div>
+        <div className="app-loading-status">INITIALIZING NEURAL UPLINK...</div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  return useIsMobile() ? <MobileNOVA /> : <DesktopNOVA />;
+  const isMobile = useIsMobile();
+  const [booting, setBooting] = useState(true);
+
+  useEffect(() => {
+    // Keep the first paint intentional rather than showing an empty shell;
+    // the short minimum also gives the font and layout a stable first frame.
+    const timer = setTimeout(() => setBooting(false), 360);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (booting) return <AppLoadingSkeleton />;
+  return isMobile ? <MobileNOVA lowEnd={LOW_END_DEVICE} /> : <DesktopNOVA />;
 }
