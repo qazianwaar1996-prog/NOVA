@@ -240,35 +240,37 @@ async function callGemini(prompt, systemPrompt) {
 }
 
 async function callGroq(prompt, systemPrompt) {
-  const res = await fetch(`${WORKER_URL}/groq`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch("https://nova-ai-proxy.qazi-anwaar1996.workers.dev/groq", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
+        {role: "system", content: systemPrompt},
+        {role: "user", content: prompt}
       ],
       max_tokens: 1000
     })
   });
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'No response';
+  return data.choices?.[0]?.message?.content || "No response from Groq";
 }
 
 async function callMistral(prompt, systemPrompt) {
-  const res = await fetch(`${WORKER_URL}/mistral`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch("https://nova-ai-proxy.qazi-anwaar1996.workers.dev/mistral", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
+      model: "mistral-small-latest",
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
+        {role: "system", content: systemPrompt},
+        {role: "user", content: prompt}
       ],
       max_tokens: 1000
     })
   });
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'No response';
+  return data.choices?.[0]?.message?.content || "No response from Mistral";
 }
 
 /* Pollinations AI image generation — FREE, no API key required.
