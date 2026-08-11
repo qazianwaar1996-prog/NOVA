@@ -811,20 +811,26 @@ const btnStyle = {
 /* Small wrapper around navigator.clipboard with an execCommand fallback. */
 async function copyToClipboard(text) {
   try {
-    await navigator.clipboard.writeText(text);
-    return true;
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
   } catch {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(ta);
-      return ok;
-    } catch { return false; }
+    // Fall through to the legacy copy path below.
+  }
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
   }
 }
 
@@ -1595,7 +1601,9 @@ function MicButton({ voice, size = 34, variant = 'desktop' }) {
 
 const FMT_INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!\[[^\]]*\]\(https?:\/\/[^)\s]+\))/g;
 const FMT_IMG_RE = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/;
-const FMT_FENCE_RE = /```([a-zA-Z0-9_+#.-]*)\n?([\s\S]*?)```/g;
+// Match fenced blocks before the line formatter sees them. The optional
+// CR makes responses copied from Windows / mobile clients render cleanly.
+const FMT_FENCE_RE = /```([a-zA-Z0-9_+#.-]*)\r?\n?([\s\S]*?)```/g;
 
 const fmtH2Style = {
   fontFamily: 'Orbitron, monospace',
@@ -1605,7 +1613,7 @@ const fmtH2Style = {
 };
 const fmtH3Style = {
   fontFamily: 'Orbitron, monospace',
-  fontSize: 12.5, fontWeight: 700, letterSpacing: 1.2,
+  fontSize: 12.5, fontWeight: 800, letterSpacing: 1.2,
   color: ORANGE, margin: '13px 0 6px', lineHeight: 1.4, wordBreak: 'break-word',
 };
 const fmtCodeBlockStyle = {
@@ -1630,8 +1638,10 @@ function renderInline(line, keyBase) {
     if (m[1]) {
       nodes.push(
         <code key={`${keyBase}-c${n++}`} style={{
-          background: 'rgba(255,154,38,0.12)',
-          border: '1px solid rgba(255,154,38,0.25)',
+          // Inline code uses the same dark treatment as fenced code, but
+          // stays compact so commands and file names remain readable inline.
+          background: 'rgba(0,0,0,0.68)',
+          border: '1px solid rgba(255,154,38,0.30)',
           borderRadius: 3, padding: '1px 5px',
           fontFamily: MONO, fontSize: '0.92em', color: '#ffc24d',
           wordBreak: 'break-word',
@@ -1662,7 +1672,10 @@ function renderInline(line, keyBase) {
 }
 
 /* Walk the lines of a (non-code) text chunk and emit formatted blocks:
-   headers, bullet lists, numbered lists, and paragraphs. */
+   headers, bullet lists, numbered lists, and paragraphs. Keeping the list
+   elements semantic is useful on a phone: screen readers announce the
+   structure and the browser still gives the response a natural reading
+   order. */
 function renderFormattedLines(text, keyBase) {
   const lines = String(text).split(/\r?\n/);
   const out = [];
@@ -1674,65 +1687,69 @@ function renderFormattedLines(text, keyBase) {
     if (!line) { i++; continue; }
 
     let m;
-    // ### → orange bold header
+    // ### → smaller orange bold header. Allow `###Title` as well as the
+    // usual markdown `### Title`, since model output is not always uniform.
     if ((m = line.match(/^#{3,}\s*(.+)$/))) {
       out.push(<div key={`${keyBase}-h3-${k++}`} style={fmtH3Style}>{renderInline(m[1], `${keyBase}-h3x${k}`)}</div>);
       i++; continue;
     }
     // ## (or a lone #) → larger orange header
-    if ((m = line.match(/^#{1,2}\s+(.+)$/))) {
+    if ((m = line.match(/^#{1,2}\s*(.+)$/))) {
       out.push(<div key={`${keyBase}-h2-${k++}`} style={fmtH2Style}>{renderInline(m[1], `${keyBase}-h2x${k}`)}</div>);
       i++; continue;
     }
-    // - / * / • → bullet points with orange dot (group consecutive runs)
-    if (/^[-*•]\s+/.test(line)) {
+    // - / * / • → bullet points with an orange dot (group consecutive runs)
+    const bulletMatch = line.match(/^[-*•](?:\s+)(.+)$/);
+    if (bulletMatch) {
       const items = [];
       while (i < lines.length) {
-        const bm = lines[i].trim().match(/^[-*•]\s+(.+)$/);
+        const bm = lines[i].trim().match(/^[-*•](?:\s+)(.+)$/);
         if (!bm) break;
         items.push(bm[1]);
         i++;
       }
       const key = `${keyBase}-ul-${k++}`;
       out.push(
-        <div key={key} role="list" style={{ margin: '6px 0 10px' }}>
+        <ul key={key} role="list" style={{ listStyle: 'none', padding: 0, margin: '6px 0 10px' }}>
           {items.map((it, j) => (
-            <div role="listitem" key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '3px 0' }}>
+            <li key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '3px 0' }}>
               <span aria-hidden="true" style={{
                 width: 6, height: 6, borderRadius: '50%',
                 background: ORANGE, boxShadow: `0 0 6px ${ORANGE}`,
                 flex: 'none', marginTop: 7,
               }} />
               <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{renderInline(it, `${key}-${j}`)}</span>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       );
       continue;
     }
-    // 1. / 2) → numbered list items (group consecutive runs)
-    if (/^\d+[.)]\s+/.test(line)) {
+    // 1. / 2) → numbered list items (group consecutive runs). Preserve
+    // the number supplied by NOVA instead of silently renumbering it.
+    const numberMatch = line.match(/^\d+[.)](?:\s+)(.+)$/);
+    if (numberMatch) {
       const items = [];
       while (i < lines.length) {
-        const nm = lines[i].trim().match(/^\d+[.)]\s+(.+)$/);
+        const nm = lines[i].trim().match(/^(\d+)[.)](?:\s+)(.+)$/);
         if (!nm) break;
-        items.push(nm[1]);
+        items.push({ number: nm[1], text: nm[2] });
         i++;
       }
       const key = `${keyBase}-ol-${k++}`;
       out.push(
-        <div key={key} role="list" style={{ margin: '6px 0 10px' }}>
+        <ol key={key} role="list" style={{ listStyle: 'none', padding: 0, margin: '6px 0 10px' }}>
           {items.map((it, j) => (
-            <div role="listitem" key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '3px 0' }}>
+            <li key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '3px 0' }}>
               <span style={{
-                flex: 'none', minWidth: 20, textAlign: 'right',
+                flex: 'none', minWidth: 24, textAlign: 'right',
                 fontFamily: MONO, fontSize: 11, fontWeight: 700,
                 color: ORANGE, marginTop: 1,
-              }}>{String(j + 1).padStart(2, '0')}</span>
-              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{renderInline(it, `${key}-${j}`)}</span>
-            </div>
+              }}>{it.number}.</span>
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{renderInline(it.text, `${key}-${j}`)}</span>
+            </li>
           ))}
-        </div>
+        </ol>
       );
       continue;
     }
@@ -1756,7 +1773,7 @@ function renderNovaText(text) {
   FMT_FENCE_RE.lastIndex = 0;
   while ((m = FMT_FENCE_RE.exec(text)) !== null) {
     if (m.index > last) segments.push({ type: 'text', value: text.slice(last, m.index) });
-    segments.push({ type: 'code', lang: (m[1] || '').trim(), value: m[2].replace(/\n$/, '') });
+    segments.push({ type: 'code', lang: (m[1] || '').trim(), value: m[2].replace(/\r?\n$/, '') });
     last = m.index + m[0].length;
   }
   if (last < text.length) segments.push({ type: 'text', value: text.slice(last) });
@@ -1785,7 +1802,13 @@ function renderNovaText(text) {
 // plus the right renderer (weekly report / SEO structured / formatted text).
 function NOVAOutputContent({ output, agent, seoMode, weeklyMode }) {
   return (
-    <div style={{ fontFamily: 'monospace', fontSize: 12.5, color: '#e8c98a', lineHeight: 1.7, wordBreak: 'break-word' }}>
+    <div style={{
+      fontFamily: 'var(--fb), system-ui, sans-serif',
+      fontSize: 13,
+      color: '#e8c98a',
+      lineHeight: 1.7,
+      wordBreak: 'break-word',
+    }}>
       {/* TEMPORARY DEBUG: if the response contains "Error:", surface the
           raw error verbatim at the top so we can see exactly which API
           is failing and why. Remove once API keys are confirmed. */}
@@ -1883,32 +1906,45 @@ function NOVAOutputSheet({ output, agent, onClose }) {
   const [closing, setClosing] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const dragInfo = useRef(null);
+  const closingRef = useRef(false);
+  const closeTimerRef = useRef(null);
 
-  // Slide in after mount + lock background scroll while open.
+  /* Animated close: slide back down, then unmount. A ref prevents a second
+     backdrop tap or Escape press from scheduling another unmount callback
+     while the sheet is already sliding away. */
+  const close = () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    closeTimerRef.current = setTimeout(onClose, 300);
+  };
+
+  // Slide in after mount + lock background scroll while open. The inner
+  // response region remains the only scroll container while the sheet is up.
   useEffect(() => {
     const t = setTimeout(() => setEntered(true), 25);
     const prevOverflow = document.body.style.overflow;
+    const prevOverscroll = document.body.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.body.style.overscrollBehavior = 'none';
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
     window.addEventListener('keydown', onKey);
     return () => {
       clearTimeout(t);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
       document.body.style.overflow = prevOverflow;
+      document.body.style.overscrollBehavior = prevOverscroll;
       window.removeEventListener('keydown', onKey);
     };
+    // `close` intentionally uses refs so this listener is not rebound for
+    // every render while the copy button or drag gesture updates state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
 
   if (!output) return null;
 
   const seoMode = isSeoResponse(agent, output);
   const weeklyMode = parseWeeklyReport(output) !== null;
-
-  /* Animated close: slide back down, then unmount. */
-  const close = () => {
-    if (closing) return;
-    setClosing(true);
-    setTimeout(onClose, 300);
-  };
 
   const copyAll = async () => {
     const ok = await copyToClipboard(output);
@@ -1971,9 +2007,20 @@ function NOVAOutputSheet({ output, agent, onClose }) {
         }}
       />
       {/* Sheet */}
-      <div role="dialog" aria-modal="true" aria-label={`${agent} output`} style={{
+      <div
+        id="nova-output-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${agent} output`}
+        style={{
         position: 'absolute', left: 0, right: 0, bottom: 0,
+        width: '100%',
         height: sheetHeight,
+        // `80vh` is the requested expanded size; maxHeight gives mobile
+        // browsers with dynamic toolbars a safe fallback without shrinking
+        // the full-width bottom-sheet layout on desktop-sized emulators.
+        maxHeight: expanded ? '80dvh' : '46dvh',
+        minHeight: 0,
         background: 'linear-gradient(180deg, #1a0e03 0%, #0a0500 100%)',
         borderTop: '1px solid rgba(255,154,38,0.5)',
         borderRadius: '18px 18px 0 0',
@@ -1984,6 +2031,7 @@ function NOVAOutputSheet({ output, agent, onClose }) {
           : 'transform 300ms cubic-bezier(0.32,0.72,0.35,1), height 300ms cubic-bezier(0.32,0.72,0.35,1)',
         display: 'flex', flexDirection: 'column',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        overscrollBehavior: 'contain',
         willChange: 'transform, height',
       }}>
         {/* Drag handle */}
@@ -1992,7 +2040,16 @@ function NOVAOutputSheet({ output, agent, onClose }) {
           onPointerMove={onHandlePointerMove}
           onPointerUp={onHandlePointerUp}
           onPointerCancel={onHandlePointerCancel}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setExpanded((v) => !v);
+            }
+          }}
           role="button"
+          tabIndex={0}
+          aria-expanded={expanded}
+          aria-controls="nova-output-sheet-body"
           aria-label={expanded ? 'Collapse or drag down to close' : 'Expand or drag down to close'}
           style={{
             flex: 'none',
@@ -2041,7 +2098,7 @@ function NOVAOutputSheet({ output, agent, onClose }) {
                 color: copiedAll ? '#35e08a' : ORANGE,
                 padding: '6px 10px', fontSize: 9,
               }}
-            >{copiedAll ? '✓ COPIED' : '⎘ COPY ALL'}</button>
+            >{copiedAll ? '✓ COPIED ALL' : '⎘ COPY ALL'}</button>
             <button
               type="button"
               onClick={close}
@@ -2055,10 +2112,15 @@ function NOVAOutputSheet({ output, agent, onClose }) {
           </div>
         </div>
 
-        {/* Scrollable response body */}
-        <div style={{
+        {/* Scrollable response body. `minHeight: 0` is important inside the
+            flex column; without it, long responses can force the sheet past
+            the viewport instead of scrolling inside the 80vh panel. */}
+        <div id="nova-output-sheet-body" style={{
           flex: 1, minHeight: 0,
-          overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+          overflowY: 'auto', overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          touchAction: 'pan-y',
           padding: '14px 16px 26px',
           scrollbarWidth: 'thin',
           scrollbarColor: 'rgba(255,154,38,0.4) transparent',
