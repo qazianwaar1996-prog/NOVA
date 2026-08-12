@@ -3238,6 +3238,7 @@ function CommandBar() {
   const [flash, setFlash] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [output, setOutput] = useState(null);
+  const [showOutput, setShowOutput] = useState(false);
   const [agent, setAgent] = useState('NOVA');
   const outputRequestRef = useRef(0);
 
@@ -3280,9 +3281,10 @@ function CommandBar() {
     if (!preserveInput) setCmd('');
     setFlash(true);
     setTimeout(() => setFlash(false), 480);
-    // Open the output panel before the network call starts so the user gets
-    // immediate feedback instead of waiting for the first response byte.
+    // Keep panel visibility independent from response/loading data. Once
+    // opened it remains open until closeOutput is called by the user.
     setOutput(null);
+    setShowOutput(true);
     setThinking(true);
     // push a PROCESSING entry to the live activity feed
     pushActivity({
@@ -3296,7 +3298,10 @@ function CommandBar() {
     // the Command Console panel while the API call runs.
     const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
     if (ok) {
-      if (requestId === outputRequestRef.current) setOutput(reply);
+      if (requestId === outputRequestRef.current) {
+        setOutput(reply);
+        setShowOutput(true);
+      }
       // follow-up entry with the result summary
       pushActivity({
         t: nowStamp(),
@@ -3309,7 +3314,10 @@ function CommandBar() {
       // can review the conversation and NOVA has it on next session.
       pushHistoryEntry(userCmd, det, reply);
     } else {
-      if (requestId === outputRequestRef.current) setOutput(reply);
+      if (requestId === outputRequestRef.current) {
+        setOutput(reply);
+        setShowOutput(true);
+      }
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -3325,6 +3333,7 @@ function CommandBar() {
     // Invalidate a request whose panel was dismissed so its late response
     // cannot reopen the modal after the user starts a new command.
     outputRequestRef.current += 1;
+    setShowOutput(false);
     setOutput(null);
     setThinking(false);
   };
@@ -3438,7 +3447,7 @@ function CommandBar() {
         ))}
       </div>
 
-      {(output || thinking) && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
+      {showOutput && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
     </>
   );
 }
@@ -4008,6 +4017,7 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
   const [cmd, setCmd] = useState('');
   const [executed, setExecuted] = useState(false);
   const [output, setOutput] = useState(null);
+  const [showOutput, setShowOutput] = useState(false);
   const [agent, setAgent] = useState('NOVA');
   const outputRequestRef = useRef(0);
 
@@ -4040,6 +4050,9 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
     setAgent(det);
     if (!preserveInput) setCmd('');
     setOutput(null);
+    // Visibility is explicit: clearing/replacing the response must not
+    // unmount the sheet while the request changes from loading to complete.
+    setShowOutput(true);
     setExecuted(true);
     if (onThinkingChange) onThinkingChange(true);
     pushActivity({
@@ -4051,7 +4064,10 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
     });
     const { ok, reply } = await logNovaCommand(userCmd, det, () => sendToNOVA(userCmd));
     if (ok) {
-      if (requestId === outputRequestRef.current) setOutput(reply);
+      if (requestId === outputRequestRef.current) {
+        setOutput(reply);
+        setShowOutput(true);
+      }
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -4061,7 +4077,10 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
       });
       pushHistoryEntry(userCmd, det, reply);
     } else {
-      if (requestId === outputRequestRef.current) setOutput(reply);
+      if (requestId === outputRequestRef.current) {
+        setOutput(reply);
+        setShowOutput(true);
+      }
       pushActivity({
         t: nowStamp(),
         name: det,
@@ -4082,6 +4101,7 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
 
   const closeOutput = () => {
     outputRequestRef.current += 1;
+    setShowOutput(false);
     setOutput(null);
     if (onThinkingChange) onThinkingChange(false);
   };
@@ -4158,7 +4178,7 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
           </button>
         ))}
       </div>
-      {(output || thinking) && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
+      {showOutput && <NOVAOutputModal output={output} agent={agent} loading={thinking} onClose={closeOutput} />}
     </div>
   );
 }
