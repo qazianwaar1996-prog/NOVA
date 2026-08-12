@@ -271,23 +271,44 @@ const WORKER_URL = "https://nova-ai-proxy.qazi-anwaar1996.workers.dev";
    server-side and returns the provider's JSON response. On success it
    returns the model's text reply.                                */
 
-async function callGemini(prompt, systemPrompt) {
+/* Convert NOVA's shared history shape into the provider-specific Gemini
+   `contents` shape. The public history stays `{ role, content }` so the
+   chat-completion providers can receive the same context unchanged. */
+function toGeminiContents(messages) {
+  return messages.map(({ role, content }) => ({
+    role: role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: String(content) }],
+  }));
+}
+
+async function readProviderJson(res, provider) {
+  const data = await res.json();
+  if (!res.ok) {
+    const detail = data?.error?.message || data?.message || `HTTP ${res.status}`;
+    throw new Error(`${provider}: ${detail}`);
+  }
+  return data;
+}
+
+async function callGemini(messages, systemPrompt) {
   const res = await fetch("https://nova-ai-proxy.qazi-anwaar1996.workers.dev/gemini", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
-      contents: [{parts: [{text: prompt}]}],
+      contents: toGeminiContents(messages),
       systemInstruction: {parts: [{text: systemPrompt}]},
       // Keep the first answer fast enough for the command-center UI. The
       // Worker forwards this Gemini generationConfig unchanged.
       generationConfig: { maxOutputTokens: 800 }
     })
   });
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response from Gemini";
+  const data = await readProviderJson(res, 'Gemini');
+  const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!reply) throw new Error('Gemini returned no response');
+  return reply;
 }
 
-async function callGroq(prompt, systemPrompt) {
+async function callGroq(messages, systemPrompt) {
   const res = await fetch("https://nova-ai-proxy.qazi-anwaar1996.workers.dev/groq", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -295,16 +316,18 @@ async function callGroq(prompt, systemPrompt) {
       model: "llama-3.3-70b-versatile",
       messages: [
         {role: "system", content: systemPrompt},
-        {role: "user", content: prompt}
+        ...messages,
       ],
       max_tokens: 1000
     })
   });
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || "No response from Groq";
+  const data = await readProviderJson(res, 'Groq');
+  const reply = data.choices?.[0]?.message?.content;
+  if (!reply) throw new Error('Groq returned no response');
+  return reply;
 }
 
-async function callMistral(prompt, systemPrompt) {
+async function callMistral(messages, systemPrompt) {
   const res = await fetch("https://nova-ai-proxy.qazi-anwaar1996.workers.dev/mistral", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -312,13 +335,15 @@ async function callMistral(prompt, systemPrompt) {
       model: "mistral-small-latest",
       messages: [
         {role: "system", content: systemPrompt},
-        {role: "user", content: prompt}
+        ...messages,
       ],
       max_tokens: 1000
     })
   });
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || "No response from Mistral";
+  const data = await readProviderJson(res, 'Mistral');
+  const reply = data.choices?.[0]?.message?.content;
+  if (!reply) throw new Error('Mistral returned no response');
+  return reply;
 }
 
 /* Pollinations AI image generation — FREE, no API key required.
@@ -354,33 +379,48 @@ function modelForAgent(agent) {
 // and go straight to Pollinations image generation. The weekly briefing
 // still gets its specialized structured prompt.
 async function sendToNOVA(userCmd) {
-  const agent = detectAgent(userCmd);
+  const content = String(userCmd || '').trim();
+  if (!content) return '';
+
+  // Keep the conversation in one module-level array. Add the user turn
+  // before taking the snapshot so the current command is included in the
+  // request, then add NOVA's turn only after the provider has replied.
+  novaHistory.push({ role: 'user', content });
+  const messages = novaHistory.slice(-10);
+  const agent = detectAgent(content);
+  let reply;
+
   // IMAGE AGENT → Pollinations (free, no key). Keep this non-LLM route so
   // image generation still works even if the text providers are flaky.
   try {
     if (agent === 'IMAGE') {
-      const imageUrl = await generateImage(userCmd);
-      return `[IMAGE AGENT] ACTIVATED\n\nGenerating image via Pollinations AI…\n\n![Generated Image](${imageUrl})\n\nImage URL: ${imageUrl}`;
-    }
+      const imageUrl = await generateImage(content);
+      reply = `[IMAGE AGENT] ACTIVATED\n\nGenerating image via Pollinations AI…\n\n![Generated Image](${imageUrl})\n\nImage URL: ${imageUrl}`;
+    } else {
+      const systemPrompt = isWeeklyReport(content) ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT;
 
-    const systemPrompt = isWeeklyReport(userCmd) ? WEEKLY_REPORT_PROMPT : SYSTEM_PROMPT;
-
-    // Gemini is ALWAYS the primary API for everything (most generous free
-    // tier). Only fall back to Groq if Gemini fails. Otherwise surface a
-    // clear error so the debug line in NOVAOutputModal can show it.
-    try {
-      const reply = await callGemini(userCmd, systemPrompt);
-      return reply;
-    } catch (e1) {
+      // Gemini is ALWAYS the primary API for everything (most generous free
+      // tier). Only fall back to Groq if Gemini fails. Both providers receive
+      // the same last-ten-message context snapshot.
       try {
-        return await callGroq(userCmd, systemPrompt);
-      } catch (e2) {
-        return `NOVA offline. Error: ${e1 && e1.message ? e1.message : e1} | Groq error: ${e2 && e2.message ? e2.message : e2}`;
+        reply = await callGemini(messages, systemPrompt);
+      } catch (e1) {
+        try {
+          reply = await callGroq(messages, systemPrompt);
+        } catch (e2) {
+          reply = `NOVA offline. Error: ${e1 && e1.message ? e1.message : e1} | Groq error: ${e2 && e2.message ? e2.message : e2}`;
+        }
       }
     }
   } catch (err) {
-    return `Connection interrupted. Error: ${err && err.message ? err.message : err}`;
+    reply = `Connection interrupted. Error: ${err && err.message ? err.message : err}`;
   }
+
+  // The assistant turn is appended after the API/image work completes so
+  // the next command can use this response as conversational context.
+  const assistantReply = String(reply || 'No response from NOVA');
+  novaHistory.push({ role: 'assistant', content: assistantReply });
+  return assistantReply;
 }
 
 /* ═══════════════ COMMAND CONSOLE LOG BUS ═══════════════ */
@@ -3336,6 +3376,8 @@ function CommandBar() {
     setShowOutput(false);
     setOutput(null);
     setThinking(false);
+    // Start the next command with a clean, focused-ready input.
+    setCmd('');
   };
   const handleQuickPrompt = (q) => {
     if (q.id === 'weekly-report') {
@@ -3387,7 +3429,13 @@ function CommandBar() {
 
       {CMD_CHIPS.map((c, i) => (
         <Chamfer key={c} x={1176 + i * 78} y={974} w={70} h={34} c={6}>
-          <button className="sqbtn" style={{ fontFamily: 'var(--fm)', fontSize: 8.5, letterSpacing: 1, color: 'var(--tx-dim)' }}>{c}</button>
+          <button
+            type="button"
+            className="sqbtn"
+            onClick={() => exec(c)}
+            disabled={thinking}
+            style={{ fontFamily: 'var(--fm)', fontSize: 8.5, letterSpacing: 1, color: 'var(--tx-dim)' }}
+          >{c}</button>
         </Chamfer>
       ))}
 
@@ -4090,7 +4138,9 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
       });
       pushHistoryEntry(userCmd, det, reply);
     }
-    if (onThinkingChange) onThinkingChange(false);
+    // A dismissed/older request must not turn off the loading state for a
+    // newer command that is already running.
+    if (requestId === outputRequestRef.current && onThinkingChange) onThinkingChange(false);
     setTimeout(() => setExecuted(false), 1200);
   };
 
@@ -4104,6 +4154,8 @@ function MobileCommandConsole({ voice: externalVoice, thinking: externalThinking
     setShowOutput(false);
     setOutput(null);
     if (onThinkingChange) onThinkingChange(false);
+    // Closing the response returns the console to a blank, ready state.
+    setCmd('');
   };
   const handleQuickPrompt = (q) => {
     if (q.id === 'weekly-report') {
