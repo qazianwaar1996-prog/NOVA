@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutGrid, Users, ClipboardList, ListTodo, Hexagon, Database, ChartColumn, Workflow,
   Settings, Network, Activity, Bell, Atom, Power, ChevronRight, CodeXml, Bug, Box,
@@ -545,8 +546,32 @@ const nowStamp = () => {
 // "SCHEMA MARKUP", "KEYWORDS", and "QUICK WINS" and captures the body
 // under each one until the next header.
 const SEO_SECTION_RE = /\b(META\s+TAGS?|OG\s+TAGS?|SCHEMA\s+MARKUP|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\b/i;
-const SEO_HEADER_RE = /^\s*(META\s+TAGS?|OG\s+TAGS?|SCHEMA\s+MARKUP|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\s*[:\-]?\s*$/i;
+// Section headers arrive in whatever shape the model felt like using:
+// "META TAGS:", "## Meta Tags", "**META TAGS**", "### Meta Tags:", "__OG TAGS__".
+// `stripHeaderDecoration` peels the markdown off so one regex can match them all.
+// Without this, a bolded header was never recognized, the section was never
+// opened, and every line under it was silently dropped from the SEO view.
+const SEO_HEADER_RE = /^\s*(META\s+TAGS?|OG\s+TAGS?|OPEN\s+GRAPH(?:\s+TAGS?)?|SCHEMA\s+MARKUP|SCHEMA|JSON[-\s]?LD|KEYWORDS?|QUICK\s+WINS?)\s*[:\-]?\s*$/i;
 const SEO_KV_RE = /^([A-Za-z][\w\-\s]{0,40}?(?:\s*\(\s*\d+\s*(?:chars?|ch)?\s*\))?)\s*[:\-]\s+(.+)$/;
+
+/* Remove leading `#`s and surrounding `**` / `__` emphasis from a candidate
+   header line so SEO_HEADER_RE can match markdown-decorated headers. */
+function stripHeaderDecoration(line) {
+  return String(line)
+    .trim()
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^\*\*\s*([\s\S]*?)\s*\*\*$/, '$1')
+    .replace(/^__\s*([\s\S]*?)\s*__$/, '$1')
+    .replace(/^\*\s*([\s\S]*?)\s*\*$/, '$1')
+    .trim();
+}
+
+/* Strip inline `**bold**` markers from a value so parsed field text doesn't
+   keep stray asterisks (e.g. "**Title:** Foo" → "Foo"). */
+const stripInlineEmphasis = (s) => String(s)
+  .replace(/\*\*([^*]+)\*\*/g, '$1')
+  .replace(/__([^_]+)__/g, '$1')
+  .trim();
 
 function parseSeoOutput(text) {
   if (!text) return null;
@@ -555,6 +580,10 @@ function parseSeoOutput(text) {
   // current section header. A header is a standalone line (or a line
   // ending with ':') that matches the known SEO section names.
   const sections = { _raw: text };
+  // Anything the model wrote before the first recognized section header
+  // (the "[SEO AGENT] ACTIVATED" line, a summary paragraph, caveats...).
+  // It used to be discarded entirely; now it is preserved and rendered.
+  const preamble = [];
   let cur = null;
   let buf = [];
   const flush = () => {
@@ -563,46 +592,54 @@ function parseSeoOutput(text) {
     buf = [];
   };
   for (const line of lines) {
-    const trimmed = line.trim();
+    const trimmed = stripHeaderDecoration(line);
     const headerMatch = trimmed.match(SEO_HEADER_RE);
     if (headerMatch) {
       flush();
       cur = headerMatch[1].toUpperCase().replace(/[-\s]+/g, ' ').trim();
       // Normalize a few common variants
       if (cur === 'JSON LD') cur = 'SCHEMA MARKUP';
+      if (cur === 'SCHEMA') cur = 'SCHEMA MARKUP';
       if (cur === 'META TAG') cur = 'META TAGS';
       if (cur === 'OG TAG') cur = 'OG TAGS';
+      if (cur === 'OPEN GRAPH' || cur === 'OPEN GRAPH TAG' || cur === 'OPEN GRAPH TAGS') cur = 'OG TAGS';
       if (cur === 'KEYWORD') cur = 'KEYWORDS';
       if (cur === 'QUICK WIN') cur = 'QUICK WINS';
       continue;
     }
     if (cur) buf.push(line);
+    else preamble.push(line);
   }
   flush();
   // --- META TAGS -----------------------------------------------------------
   const meta = {};
   const metaBlock = sections['META TAGS'] || '';
   // Pull key:value pairs from the meta block. Tolerates "(60 chars)" hints.
-  metaBlock.split(/\r?\n/).forEach((ln) => {
+  metaBlock.split(/\r?\n/).forEach((rawLn) => {
+    // Models often bold the label ("**Title:** Foo" / "- **Title**: Foo").
+    // Drop list markers and emphasis before matching so those still parse.
+    const ln = stripInlineEmphasis(rawLn.replace(/^\s*[-*•]\s+/, ''));
     const m = ln.match(SEO_KV_RE);
     if (!m) return;
     const key = m[1].trim().toLowerCase()
       .replace(/\s*\(\s*\d+\s*(?:chars?|ch)?\s*\)\s*$/, '')
       .replace(/\s+/g, ' ');
-    if (/^title|^meta\s*title/.test(key)) meta.title = m[2].trim();
-    else if (/^desc/.test(key)) meta.description = m[2].trim();
-    else if (/^keywords?/.test(key)) meta.keywords = m[2].trim();
-    else if (/^canonical/.test(key)) meta.canonical = m[2].trim();
-    else if (/^robots/.test(key)) meta.robots = m[2].trim();
+    const val = stripInlineEmphasis(m[2]);
+    if (/^title|^meta\s*title/.test(key)) meta.title = val;
+    else if (/^desc/.test(key)) meta.description = val;
+    else if (/^keywords?/.test(key)) meta.keywords = val;
+    else if (/^canonical/.test(key)) meta.canonical = val;
+    else if (/^robots/.test(key)) meta.robots = val;
   });
   // --- OG TAGS -------------------------------------------------------------
   const og = {};
   const ogBlock = sections['OG TAGS'] || '';
-  ogBlock.split(/\r?\n/).forEach((ln) => {
+  ogBlock.split(/\r?\n/).forEach((rawLn) => {
+    const ln = stripInlineEmphasis(rawLn.replace(/^\s*[-*•]\s+/, ''));
     const m = ln.match(SEO_KV_RE);
     if (!m) return;
     const key = m[1].trim().toLowerCase().replace(/^og\s+/, 'og:').replace(/\s+/g, '');
-    const val = m[2].trim();
+    const val = stripInlineEmphasis(m[2]);
     if (/^og:/.test(key)) og[key] = val;
   });
   // Also try to capture og:xxx = "yyy" pairs from inside code blocks if the
@@ -679,7 +716,41 @@ function parseSeoOutput(text) {
     keywords.length > 0 ||
     wins.length > 0
   );
-  return hit ? { meta, og, schema, keywords, wins } : null;
+  if (!hit) return null;
+
+  // Safety net: the structured SEO view only renders the fields it
+  // recognized. If the model wrote a lot of prose that none of the
+  // parsers claimed, showing only the parsed fields would look like the
+  // answer vanished. Measure how much of the response we actually
+  // account for and bail out to the plain-text renderer when coverage is
+  // poor, so no content is ever silently dropped.
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  const parsedChars = [
+    ...Object.values(meta),
+    ...Object.values(og),
+    schema,
+    ...keywords,
+    ...wins,
+  ].reduce((n, v) => n + norm(v).length, 0);
+  // Structural noise the card layout reproduces on its own: section
+  // headers become card titles, and field labels / list markers become
+  // the row labels. Excluding them keeps the ratio honest about *prose*.
+  const structuralChars = lines.reduce((n, ln) => {
+    const bare = stripHeaderDecoration(ln);
+    if (SEO_HEADER_RE.test(bare)) return n + norm(ln).length;
+    const kv = stripInlineEmphasis(ln.replace(/^\s*[-*•]\s+/, '')).match(SEO_KV_RE);
+    if (kv) return n + norm(ln).length - norm(kv[2]).length;
+    const marker = ln.match(/^\s*(?:\d+[.)]\s+|[-*•]\s+)/);
+    return marker ? n + marker[0].length : n;
+  }, 0);
+  // The preamble is rendered above the cards, so it counts as covered.
+  const preambleChars = norm(preamble.join(' ')).length;
+  const totalChars = norm(text).length;
+  const covered = parsedChars + preambleChars + structuralChars;
+  const coverage = totalChars === 0 ? 1 : covered / totalChars;
+  if (coverage < 0.5) return null;
+
+  return { meta, og, schema, keywords, wins, preamble: preamble.join('\n').trim() };
 }
 
 /* Detect if the response is an SEO-shaped payload. */
@@ -925,7 +996,7 @@ function SEOModalBody({ output }) {
     return <pre style={codePanelStyle}>{output}</pre>;
   }
 
-  const { meta, og, schema, keywords, wins } = seo;
+  const { meta, og, schema, keywords, wins, preamble } = seo;
   const hasOg = Object.keys(og).length > 0;
   const standardOg = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type', 'og:site_name'];
   const ogEntries = standardOg
@@ -949,6 +1020,12 @@ function SEOModalBody({ output }) {
 
   return (
     <div>
+      {/* Anything NOVA wrote before the first SEO section (activation
+          line, summary, caveats) — rendered so it is never lost. */}
+      {preamble && (
+        <div style={{ marginBottom: 4 }}>{renderNovaText(preamble)}</div>
+      )}
+
       {/* ── META TAGS ─────────────────────────────────────────────── */}
       {Object.keys(meta).length > 0 && (
         <>
@@ -2354,12 +2431,23 @@ function NOVAOutputSheet({ output, agent, onClose, loading = false }) {
   );
 }
 
-/* Entry point — bottom sheet on mobile, centered dialog on desktop. */
+/* Entry point — bottom sheet on mobile, centered dialog on desktop.
+
+   The panel is portalled to <body>. This is essential: the mobile command
+   console (`.mobile-command-console`) is a `position: fixed` element that
+   also sets `transform` and `clip-path`, and the desktop `.design` stage is
+   `transform: scale()`d. A transformed ancestor becomes the containing block
+   for `position: fixed` descendants, and `clip-path` clips them — so
+   rendering the sheet inline made it size itself against that small bar and
+   get clipped away to nothing. The command still ran and was saved to
+   history, which is exactly why the response only showed up there. */
 function NOVAOutputModal(props) {
   const isMobile = useIsMobile();
-  return isMobile
+  const panel = isMobile
     ? <NOVAOutputSheet {...props} />
     : <NOVAOutputDesktopModal {...props} />;
+  if (typeof document === 'undefined') return panel;
+  return createPortal(panel, document.body);
 }
 
 /* deterministic PRNG helpers */
@@ -4182,7 +4270,10 @@ function MobileNOVA({ lowEnd = false }) {
         <NOVAOutputModal
           output={historyEntry.response}
           agent={historyEntry.agent}
-          onClose={() => { setHistoryEntry(null); handleThinkingDone(); }}
+          // `handleThinkingDone` never existed — calling it threw a
+          // ReferenceError inside the click handler, leaving the modal
+          // stuck open. Clear the entry and drop the thinking flag.
+          onClose={() => { setHistoryEntry(null); setThinking(false); }}
         />
       )}
     </div>
@@ -4527,7 +4618,9 @@ function HistoryView({ onOpen, onClose, compact = false }) {
    so the History view can sit on top of whatever is currently
    showing. Tapping the backdrop closes. */
 function HistoryOverlay({ onOpen, onClose, label = 'COMMAND HISTORY' }) {
-  return (
+  // Portalled to <body> for the same reason as NOVAOutputModal: transformed
+  // / clipped ancestors would otherwise trap this fixed overlay.
+  const overlay = (
     <div
       onClick={onClose}
       style={{
@@ -4549,6 +4642,8 @@ function HistoryOverlay({ onOpen, onClose, label = 'COMMAND HISTORY' }) {
       </div>
     </div>
   );
+  if (typeof document === 'undefined') return overlay;
+  return createPortal(overlay, document.body);
 }
 
 function AppLoadingSkeleton() {
